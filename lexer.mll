@@ -29,8 +29,8 @@ let destvar = "tevprev"
 let chanselect = "." ("r" | "g" | "b" | "a")+
 
 rule token = parse
-    intnum as n     { INT n }
-  | floatnum as n   { FLOAT n }
+    intnum as n     { INT (Int32.of_string n) }
+  | floatnum as n   { FLOAT (float_of_string n) }
   | var as v
       {
         let vt = match v with
@@ -70,6 +70,7 @@ rule token = parse
   | ")"		    { RPAREN }
   | "="		    { ASSIGN }
   | ":"		    { COLON }
+  | ";"		    { SEMICOLON }
   | chanselect as c { CHANSELECT c }
   | "\n"	    { EOL }
   | (" "|"\t")+	    { token lexbuf }
