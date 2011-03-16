@@ -71,6 +71,19 @@ rule token = parse
   | "="		    { ASSIGN }
   | ":"		    { COLON }
   | ";"		    { SEMICOLON }
-  | chanselect as c { CHANSELECT c }
+  | ","		    { COMMA }
+  | "?"		    { QUESTIONMARK }
+  | "clamp"	    { CLAMP }
+  | "mix"	    { MIX }
+  | chanselect as c { let arr = Array.create (String.length c - 1) Expr.R in
+		      for i = 1 to String.length c - 1 do
+		        arr.(i - 1) <- match c.[i] with
+			  'r' -> Expr.R
+			| 'g' -> Expr.G
+			| 'b' -> Expr.B
+			| 'a' -> Expr.A
+			| _ -> failwith "Bad channel selector"
+		      done;
+		      CHANSELECT arr }
   | "\n"	    { EOL }
   | (" "|"\t")+	    { token lexbuf }

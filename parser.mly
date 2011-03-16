@@ -3,12 +3,12 @@
 %}
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT DIVIDE MULT PLUS MINUS STAGE COLON
-%token SEMICOLON
+%token SEMICOLON QUESTIONMARK CLAMP MIX COMMA
 %token <int32> INT
 %token <float> FLOAT
 %token <Expr.var_param> VAR
 %token <Expr.dest_var> DESTVAR
-%token <string> CHANSELECT
+%token <Expr.lane_select array> CHANSELECT
 
 %left PLUS MINUS
 %left MULT DIVIDE
@@ -40,6 +40,24 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | MINUS e = stage_expr	{ Expr.Neg e }
 	  | a = DESTVAR ASSIGN b = stage_expr
 					{ Expr.Assign (a, b) }
+	  | a = select_expr EQ b = select_expr
+					{ Expr.Ceq (a, b) }
+	  | a = select_expr GT b = select_expr
+					{ Expr.Cgt (a, b) }
+	  | a = select_expr LT b = select_expr
+					{ Expr.Clt (a, b) }
+	  | a = stage_expr QUESTIONMARK b = stage_expr COLON c = stage_expr
+					{ Expr.Ternary (a, b, c) }
+	  | CLAMP LPAREN c = stage_expr RPAREN
+					{ Expr.Clamp c }
+	  | MIX LPAREN a = stage_expr COMMA b = stage_expr COMMA
+	    c = stage_expr RPAREN
+					{ Expr.Mix (a, b, c) }
+;
+
+select_expr: e = stage_expr		{ (e, [||]) }
+	   | e = stage_expr c = CHANSELECT
+					{ (e, c) }
 ;
 
 %%
