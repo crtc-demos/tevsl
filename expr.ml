@@ -29,16 +29,51 @@ and var_param =
   | A1
   | C2
   | A2
+  | K0 of lane_select option
+  | K1 of lane_select option
+  | K2 of lane_select option
+  | K3 of lane_select option
   | Texc
   | Texa
   | Rasc
   | Rasa
+  | Extracted_const
 
 and dest_var =
     Tevprev
   | Tevreg0
   | Tevreg1
   | Tevreg2
+
+and const_setting =
+    KCSEL_1
+  | KCSEL_7_8
+  | KCSEL_3_4
+  | KCSEL_5_8
+  | KCSEL_1_2
+  | KCSEL_3_8
+  | KCSEL_1_4
+  | KCSEL_1_8
+  | KCSEL_K0
+  | KCSEL_K1
+  | KCSEL_K2
+  | KCSEL_K3
+  | KCSEL_K0_R
+  | KCSEL_K1_R
+  | KCSEL_K2_R
+  | KCSEL_K3_R
+  | KCSEL_K0_G
+  | KCSEL_K1_G
+  | KCSEL_K2_G
+  | KCSEL_K3_G
+  | KCSEL_K0_B
+  | KCSEL_K1_B
+  | KCSEL_K2_B
+  | KCSEL_K3_B
+  | KCSEL_K0_A
+  | KCSEL_K1_A
+  | KCSEL_K2_A
+  | KCSEL_K3_A
 
 (* 
     TevColorIn: a b c d
@@ -91,7 +126,7 @@ and var_setting =
   | CC_rasa
   | CC_one
   | CC_half
-  | CC_const of unit
+  | CC_const
   | CC_zero
 
 and tev_op =
@@ -122,3 +157,4 @@ and scale_values =
 and tev =
     Arith of arith_op
   | Comp of compare_op
+
