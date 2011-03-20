@@ -22,10 +22,6 @@ let var = "cprev"
 	| "k1"
 	| "k2"
 	| "k3"
-	| "k0" chanselect
-	| "k1" chanselect
-	| "k2" chanselect
-	| "k3" chanselect
 	| "texc"
 	| "texa"
 	| "rasc"
@@ -50,30 +46,15 @@ rule token = parse
 	| "a1" -> Expr.A1
 	| "c2" -> Expr.C2
 	| "a2" -> Expr.A2
-	| "k0" -> Expr.K0 None
-	| "k1" -> Expr.K1 None
-	| "k2" -> Expr.K2 None
-	| "k3" -> Expr.K3 None
-	| "k0.r" -> Expr.K0 (Some Expr.R)
-	| "k1.r" -> Expr.K1 (Some Expr.R)
-	| "k2.r" -> Expr.K2 (Some Expr.R)
-	| "k3.r" -> Expr.K3 (Some Expr.R)
-	| "k0.g" -> Expr.K0 (Some Expr.G)
-	| "k1.g" -> Expr.K1 (Some Expr.G)
-	| "k2.g" -> Expr.K2 (Some Expr.G)
-	| "k3.g" -> Expr.K3 (Some Expr.G)
-	| "k0.b" -> Expr.K0 (Some Expr.B)
-	| "k1.b" -> Expr.K1 (Some Expr.B)
-	| "k2.b" -> Expr.K2 (Some Expr.B)
-	| "k3.b" -> Expr.K3 (Some Expr.B)
-	| "k0.a" -> Expr.K0 (Some Expr.A)
-	| "k1.a" -> Expr.K1 (Some Expr.A)
-	| "k2.a" -> Expr.K2 (Some Expr.A)
-	| "k3.a" -> Expr.K3 (Some Expr.A)
+	| "k0" -> Expr.K0
+	| "k1" -> Expr.K1
+	| "k2" -> Expr.K2
+	| "k3" -> Expr.K3
 	| "texc" -> Expr.Texc
 	| "texa" -> Expr.Texa
 	| "rasc" -> Expr.Rasc
-	| "rasa" -> Expr.Rasa in
+	| "rasa" -> Expr.Rasa
+	| _ -> failwith "Bad variable" in
 	VAR vt
       }
   | destvar as dv
@@ -82,7 +63,8 @@ rule token = parse
 	  "tevprev" -> Expr.Tevprev
 	| "tevreg0" -> Expr.Tevreg0
 	| "tevreg1" -> Expr.Tevreg1
-	| "tevreg2" -> Expr.Tevreg2 in
+	| "tevreg2" -> Expr.Tevreg2
+	| _ -> failwith "Bad dest variable" in
 	DESTVAR vt
       }
   | "stage"	    { STAGE }

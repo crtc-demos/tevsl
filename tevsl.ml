@@ -23,7 +23,7 @@ let cvar_of_expr = function
   | Var_ref A1 -> CC_a1
   | Var_ref C2 -> CC_c2
   | Var_ref A2 -> CC_a2
-  | Var_ref (K0 _ | K1 _ | K2 _ | K3 _) -> CC_const
+  | Var_ref (K0 | K1 | K2 | K3) -> CC_const
   | Var_ref Texc -> CC_texc
   | Var_ref Texa -> CC_texa
   | Var_ref Rasc -> CC_rasc
@@ -71,9 +71,9 @@ let rewrite_const expr =
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
   | Assign (dv, e) -> Assign (dv, scan e)
-  | Ceq ((a, la), (b, lb)) -> Ceq ((scan a, la), (scan b, lb))
-  | Cgt ((a, la), (b, lb)) -> Cgt ((scan a, la), (scan b, lb))
-  | Clt ((a, la), (b, lb)) -> Clt ((scan a, la), (scan b, lb))
+  | Ceq (a, b) -> Ceq (scan a, scan b)
+  | Cgt (a, b) -> Cgt (scan a, scan b)
+  | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
   | Float 1.0 -> set_const KCSEL_1
   | Float 0.875 -> set_const KCSEL_7_8
@@ -83,31 +83,92 @@ let rewrite_const expr =
   | Float 0.375 -> set_const KCSEL_3_8
   | Float 0.25 -> set_const KCSEL_1_4
   | Float 0.125 -> set_const KCSEL_1_8
-  | Var_ref (K0 None) -> set_const KCSEL_K0
-  | Var_ref (K1 None) -> set_const KCSEL_K1
-  | Var_ref (K2 None) -> set_const KCSEL_K2
-  | Var_ref (K3 None) -> set_const KCSEL_K3
-  | Var_ref (K0 (Some R)) -> set_const KCSEL_K0_R
-  | Var_ref (K1 (Some R)) -> set_const KCSEL_K1_R
-  | Var_ref (K2 (Some R)) -> set_const KCSEL_K2_R
-  | Var_ref (K3 (Some R)) -> set_const KCSEL_K3_R
-  | Var_ref (K0 (Some G)) -> set_const KCSEL_K0_G
-  | Var_ref (K1 (Some G)) -> set_const KCSEL_K1_G
-  | Var_ref (K2 (Some G)) -> set_const KCSEL_K2_G
-  | Var_ref (K3 (Some G)) -> set_const KCSEL_K3_G
-  | Var_ref (K0 (Some B)) -> set_const KCSEL_K0_B
-  | Var_ref (K1 (Some B)) -> set_const KCSEL_K1_B
-  | Var_ref (K2 (Some B)) -> set_const KCSEL_K2_B
-  | Var_ref (K3 (Some B)) -> set_const KCSEL_K3_B
-  | Var_ref (K0 (Some A)) -> set_const KCSEL_K0_A
-  | Var_ref (K1 (Some A)) -> set_const KCSEL_K1_A
-  | Var_ref (K2 (Some A)) -> set_const KCSEL_K2_A
-  | Var_ref (K3 (Some A)) -> set_const KCSEL_K3_A
+  | Var_ref K0 -> set_const KCSEL_K0
+  | Var_ref K1 -> set_const KCSEL_K1
+  | Var_ref K2 -> set_const KCSEL_K2
+  | Var_ref K3 -> set_const KCSEL_K3
+  | Select (Var_ref K0, [| R |]) -> set_const KCSEL_K0_R
+  | Select (Var_ref K1, [| R |]) -> set_const KCSEL_K1_R
+  | Select (Var_ref K2, [| R |]) -> set_const KCSEL_K2_R
+  | Select (Var_ref K3, [| R |]) -> set_const KCSEL_K3_R
+  | Select (Var_ref K0, [| G |]) -> set_const KCSEL_K0_G
+  | Select (Var_ref K1, [| G |]) -> set_const KCSEL_K1_G
+  | Select (Var_ref K2, [| G |]) -> set_const KCSEL_K2_G
+  | Select (Var_ref K3, [| G |]) -> set_const KCSEL_K3_G
+  | Select (Var_ref K0, [| B |]) -> set_const KCSEL_K0_B
+  | Select (Var_ref K1, [| B |]) -> set_const KCSEL_K1_B
+  | Select (Var_ref K2, [| B |]) -> set_const KCSEL_K2_B
+  | Select (Var_ref K3, [| B |]) -> set_const KCSEL_K3_B
+  | Select (Var_ref K0, [| A |]) -> set_const KCSEL_K0_A
+  | Select (Var_ref K1, [| A |]) -> set_const KCSEL_K1_A
+  | Select (Var_ref K2, [| A |]) -> set_const KCSEL_K2_A
+  | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
   | Float x -> Float x
   | Int x -> Int x
-  | Var_ref x -> Var_ref x in
+  | Var_ref x -> Var_ref x
+  | Select (a, la) -> Select (scan a, la) in
   let expr' = scan expr in
   expr', !which_const
+
+exception Incompatible_swaps
+
+let rewrite_swap_tables expr =
+  let texswap = ref None
+  and rasswap = ref None in
+  let set_tex t =
+    match !texswap with
+      None ->
+        begin match t with
+	  [| R |]
+	| [| G; R |]
+	| [| B; G; R |]
+	| [| A |] -> ()
+	| _ -> texswap := Some t
+	end
+    | Some o -> if o <> t then raise Incompatible_swaps in
+  let set_ras r =
+    match !rasswap with
+      None ->
+        begin match r with
+	  [| R |]
+	| [| G; R |]
+	| [| B; G; R |]
+	| [| A |] -> ()
+	| _ -> rasswap := Some r
+	end
+    | Some o -> if o <> r then raise Incompatible_swaps in
+  let default_swap = function
+    [| (R | G | B) |] -> [| R |]
+  | [| _; _ |] -> [| G; R |]
+  | [| _; _; _ |] -> [| B; G; R |]
+  | [| A |] -> [| A |] in
+  let rec scan = function
+    Plus (a, b) -> Plus (scan a, scan b)
+  | Minus (a, b) -> Minus (scan a, scan b)
+  | Divide (a, b) -> Divide (scan a, scan b)
+  | Mult (a, b) -> Mult (scan a, scan b)
+  | Neg a -> Neg (scan a)
+  | Clamp a -> Clamp (scan a)
+  | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
+  | Assign (dv, e) -> Assign (dv, scan e)
+  | Ceq (a, b) -> Ceq (scan a, scan b)
+  | Cgt (a, b) -> Cgt (scan a, scan b)
+  | Clt (a, b) -> Clt (scan a, scan b)
+  | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
+  | Var_ref x -> Var_ref x
+  | Float x -> Float x
+  | Int x -> Int x
+  | Select (Var_ref Texc, lx) ->
+      set_tex lx; Select (Var_ref Texc, default_swap lx)
+  | Select (Var_ref Texa, lx) ->
+      set_tex lx; Select (Var_ref Texa, default_swap lx)
+  | Select (Var_ref Rasc, lx) ->
+      set_ras lx; Select (Var_ref Rasc, default_swap lx)
+  | Select (Var_ref Rasa, lx) ->
+      set_ras lx; Select (Var_ref Rasa, default_swap lx)
+  | Select (x, lx) -> Select (scan x, lx) in
+  let expr' = scan expr in
+  expr', !texswap, !rasswap
 
 exception Unmatched_expr
 
@@ -142,39 +203,44 @@ let rec arith_op_of_expr = function
 	      scale = scale_of_expr tevscale;
 	      clamp = false;
 	      result = dv }
-  | Assign (dv, Plus (d, Ternary (Cgt ((a, [| R |]), (b, [| R |])), c,
-				  Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Cgt (Select (a, [| R |]),
+				       Select (b, [| R |])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_r8_gt;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Ceq ((a, [| R |]), (b, [| R |])), c,
-				  Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Ceq (Select (a, [| R |]),
+				       Select (b, [| R |])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_r8_eq;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Cgt ((a, [| G; R |]), (b, [| G; R |])), c,
-				  Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Cgt (Select (a, [| G; R |]),
+				       Select (b, [| G; R |])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_gr16_gt;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Ceq ((a, [| G; R |]), (b, [| G; R |])), c,
-				  Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Ceq (Select (a, [| G; R |]),
+				       Select (b, [| G; R |])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_gr16_eq;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Cgt ((a, [| B; G; R |]), (b, [| B; G; R |])),
+  | Assign (dv, Plus (d, Ternary (Cgt (Select (a, [| B; G; R |]),
+				       Select (b, [| B; G; R |])),
 				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
@@ -182,7 +248,8 @@ let rec arith_op_of_expr = function
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_bgr24_gt;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Ceq ((a, [| B; G; R |]), (b, [| B; G; R |])),
+  | Assign (dv, Plus (d, Ternary (Ceq (Select (a, [| B; G; R |]),
+				       Select (b, [| B; G; R |])),
 				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
@@ -190,30 +257,34 @@ let rec arith_op_of_expr = function
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_bgr24_eq;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Cgt ((a, [||]), (b, [||])), c, Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Cgt (Select (a, [||]),
+				       Select (b, [||])), c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Ceq ((a, [||]), (b, [||])), c, Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Ceq (Select (a, [||]), Select (b, [||])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_rgb8_eq;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Cgt ((a, [| A |]), (b, [| A |])), c,
-				  Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Cgt (Select (a, [| A |]),
+				       Select (b, [| A |])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
 	     cmp_d = cvar_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
-  | Assign (dv, Plus (d, Ternary (Ceq ((a, [| A |]), (b, [| A |])), c,
-				  Int 0l))) ->
+  | Assign (dv, Plus (d, Ternary (Ceq (Select (a, [| A |]),
+				       Select (b, [| A |])),
+				  c, Int 0l))) ->
       Comp { cmp_a = cvar_of_expr a;
 	     cmp_b = cvar_of_expr b;
 	     cmp_c = cvar_of_expr c;
@@ -317,9 +388,9 @@ let rec rewrite_mix = function
   | Mix (a, b, c) -> Plus (Mult (Minus (Int 1l, rewrite_mix c), rewrite_mix a),
 			   Mult (rewrite_mix c, rewrite_mix b))
   | Assign (dv, e) -> Assign (dv, rewrite_mix e)
-  | Ceq ((a, la), (b, lb)) -> Ceq ((rewrite_mix a, la), (rewrite_mix b, lb))
-  | Cgt ((a, la), (b, lb)) -> Cgt ((rewrite_mix a, la), (rewrite_mix b, lb))
-  | Clt ((a, la), (b, lb)) -> Cgt ((rewrite_mix b, lb), (rewrite_mix a, la))
+  | Ceq (a, b) -> Ceq (rewrite_mix a, rewrite_mix b)
+  | Cgt (a, b) -> Cgt (rewrite_mix a, rewrite_mix b)
+  | Clt (a, b) -> Cgt (rewrite_mix b, rewrite_mix a)
   | Ternary (a, b, c) -> Ternary (rewrite_mix a, rewrite_mix b, rewrite_mix c)
   | x -> x
 
@@ -333,20 +404,17 @@ let rec rewrite_rationals = function
   | Divide (Int a, Int b) -> Float (Int32.to_float a /. Int32.to_float b)
   | Divide (Float a, Int b) -> Float (a /. Int32.to_float b)
   | Divide (Int a, Float b) -> Float (Int32.to_float a /. b)
-  | Divide (a, b) -> Divide (rewrite_rationals a, rewrite_rationals b)
   | Divide (a, (Int 2l | Float 2.0)) -> Mult (rewrite_rationals a, Float 0.5)
+  | Divide (a, b) -> Divide (rewrite_rationals a, rewrite_rationals b)
   | Mult (a, b) -> Mult (rewrite_rationals a, rewrite_rationals b)
   | Neg a -> Neg (rewrite_rationals a)
   | Clamp a -> Clamp (rewrite_rationals a)
   | Mix (a, b, c) -> Mix (rewrite_rationals a, rewrite_rationals b,
 			  rewrite_rationals c)
   | Assign (dv, e) -> Assign (dv, rewrite_rationals e)
-  | Ceq ((a, la), (b, lb)) -> Ceq ((rewrite_rationals a, la),
-				   (rewrite_rationals b, lb))
-  | Cgt ((a, la), (b, lb)) -> Cgt ((rewrite_rationals a, la),
-				   (rewrite_rationals b, lb))
-  | Clt ((a, la), (b, lb)) -> Clt ((rewrite_rationals a, la),
-				   (rewrite_rationals b, lb))
+  | Ceq (a, b) -> Ceq (rewrite_rationals a, rewrite_rationals b)
+  | Cgt (a, b) -> Cgt (rewrite_rationals a, rewrite_rationals b)
+  | Clt (a, b) -> Clt (rewrite_rationals a, rewrite_rationals b)
   | Ternary (a, b, c) -> Ternary (rewrite_rationals a, rewrite_rationals b,
 				  rewrite_rationals c)
   | Float 4.0 -> Int 4l
@@ -356,6 +424,7 @@ let rec rewrite_rationals = function
   | Float x -> Float x
   | Int x -> Int x
   | Var_ref x -> Var_ref x
+  | Select (x, lx) -> Select (rewrite_rationals x, lx)
 
 let rec rewrite_expr = function
     Var_ref x ->
@@ -379,6 +448,12 @@ let rec rewrite_expr = function
       Mult (Plus (Minus (d, Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
 		  tevbias),
 	    Int 1l)
+  | Mult (Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b)),
+          tevscale) when c = c2 ->
+      Mult (Plus (Plus (Int 0l,
+			Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
+		  Int 0l),
+	    tevscale)
   | Ternary (a, b, c) -> Plus (Int 0l, Ternary (a, b, c))
   | Clamp expr -> Clamp (rewrite_expr expr)
   | x -> x
@@ -390,6 +465,7 @@ let parseme s =
   let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
   let expr, const_extr = rewrite_const expr in
+  let expr, texswap, rasswap = rewrite_swap_tables expr in
   let comm_variants = commutative_variants expr in
   let matched = List.fold_right
     (fun variant found ->
@@ -406,4 +482,4 @@ let parseme s =
 	    None)
     comm_variants
     None in
-  matched, const_extr
+  matched, const_extr, texswap, rasswap

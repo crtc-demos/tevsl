@@ -10,6 +10,8 @@
 %token <Expr.dest_var> DESTVAR
 %token <Expr.lane_select array> CHANSELECT
 
+%left QUESTIONMARK COLON
+%left EQ LT GT
 %left PLUS MINUS
 %left MULT DIVIDE
 
@@ -40,11 +42,11 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | MINUS e = stage_expr	{ Expr.Neg e }
 	  | a = DESTVAR ASSIGN b = stage_expr
 					{ Expr.Assign (a, b) }
-	  | a = select_expr EQ b = select_expr
+	  | a = stage_expr EQ b = stage_expr
 					{ Expr.Ceq (a, b) }
-	  | a = select_expr GT b = select_expr
+	  | a = stage_expr GT b = stage_expr
 					{ Expr.Cgt (a, b) }
-	  | a = select_expr LT b = select_expr
+	  | a = stage_expr LT b = stage_expr
 					{ Expr.Clt (a, b) }
 	  | a = stage_expr QUESTIONMARK b = stage_expr COLON c = stage_expr
 					{ Expr.Ternary (a, b, c) }
@@ -53,11 +55,8 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | MIX LPAREN a = stage_expr COMMA b = stage_expr COMMA
 	    c = stage_expr RPAREN
 					{ Expr.Mix (a, b, c) }
-;
-
-select_expr: e = stage_expr		{ (e, [||]) }
-	   | e = stage_expr c = CHANSELECT
-					{ (e, c) }
+	  | e = stage_expr c = CHANSELECT
+					{ Expr.Select (e, c) }
 ;
 
 %%

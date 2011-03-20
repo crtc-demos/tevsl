@@ -10,13 +10,11 @@ type expr =
   | Clamp of expr
   | Mix of expr * expr * expr
   | Assign of dest_var * expr
-  | Ceq of select_expr * select_expr
-  | Cgt of select_expr * select_expr
-  | Clt of select_expr * select_expr
+  | Ceq of expr * expr
+  | Cgt of expr * expr
+  | Clt of expr * expr
+  | Select of expr * lane_select array
   | Ternary of expr * expr * expr
-
-and select_expr =
-  expr * lane_select array
 
 and lane_select = R | G | B | A
 
@@ -29,10 +27,10 @@ and var_param =
   | A1
   | C2
   | A2
-  | K0 of lane_select option
-  | K1 of lane_select option
-  | K2 of lane_select option
-  | K3 of lane_select option
+  | K0
+  | K1
+  | K2
+  | K3
   | Texc
   | Texa
   | Rasc
