@@ -15,9 +15,14 @@
 %left PLUS MINUS
 %left MULT DIVIDE
 
-%start <int32 * Expr.expr> stage_def
+%start <(int32 * Expr.expr) list> stage_defs
 
 %%
+
+stage_defs: option(EOL) 		{ [] }
+	  | s = stage_def option(EOL) ss = stage_defs
+					{ s :: ss }
+;
 
 stage_def: sn = stage_num se = stage_expr SEMICOLON
 					{ (sn, se) }

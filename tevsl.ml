@@ -458,9 +458,20 @@ let rec rewrite_expr = function
   | Clamp expr -> Clamp (rewrite_expr expr)
   | x -> x
 
-let parseme s =
-  let sbuf = Lexing.from_string s in
-  let stage, expr = Parser.stage_def Lexer.token sbuf in
+type stage_info = {
+  stage_operation : tev;
+  const_usage : const_setting option;
+  tex_swaps : lane_select array option;
+  ras_swaps : lane_select array option
+}
+
+let parse_string c =
+  let sbuf = Lexing.from_channel c in
+  Parser.stage_defs Lexer.token sbuf
+
+exception Cant_match_stage of int
+
+let compile_expr stage expr =
   let expr = default_assign expr in
   let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
@@ -482,4 +493,98 @@ let parseme s =
 	    None)
     comm_variants
     None in
-  matched, const_extr, texswap, rasswap
+  match matched with
+    Some (stagenum, tevop) ->
+      stagenum, {
+	stage_operation = tevop;
+	const_usage = const_extr;
+	tex_swaps = texswap;
+	ras_swaps = rasswap
+      }
+  | None -> raise (Cant_match_stage (Int32.to_int stage))
+
+let string_of_stagenum n =
+  "GX_TEVSTAGE" ^ (Int32.to_string n)
+
+let string_of_tev_input = function
+    CC_cprev -> "GX_CC_CPREV"
+  | CC_aprev -> "GX_CC_APREV"
+  | CC_c0 -> "GX_CC_C0"
+  | CC_a0 -> "GX_CC_A0"
+  | CC_c1 -> "GX_CC_C1"
+  | CC_a1 -> "GX_CC_A1"
+  | CC_c2 -> "GX_CC_C2"
+  | CC_a2 -> "GX_CC_A2"
+  | CC_texc -> "GX_CC_TEXC"
+  | CC_texa -> "GX_CC_TEXA"
+  | CC_rasc -> "GX_CC_RASC"
+  | CC_rasa -> "GX_CC_RASA"
+  | CC_one -> "GX_CC_ONE"
+  | CC_half -> "GX_CC_HALF"
+  | CC_const -> "GX_CC_KONST"
+  | CC_zero -> "GX_CC_ZERO"
+
+let string_of_tev_op = function
+    OP_add -> "GX_TEV_ADD"
+  | OP_sub -> "GX_TEV_SUB"
+
+let string_of_bias = function
+    TB_zero -> "GX_TB_ZERO"
+  | TB_addhalf -> "GX_TB_ADDHALF"
+  | TB_subhalf -> "GX_TB_SUBHALF"
+
+let string_of_scale = function
+    CS_scale_1 -> "GX_CS_SCALE_1"
+  | CS_scale_2 -> "GX_CS_SCALE_2"
+  | CS_scale_4 -> "GX_CS_SCALE_4"
+  | CS_divide_2 -> "GX_CS_DIVIDE_2"
+
+let string_of_clamp = function
+    true -> "GX_TRUE"
+  | false -> "GX_FALSE"
+
+let string_of_result = function
+    Tevprev -> "GX_TEVPREV"
+  | Tevreg0 -> "GX_TEVREG0"
+  | Tevreg1 -> "GX_TEVREG1"
+  | Tevreg2 -> "GX_TEVREG2"
+
+let string_of_cmp_op = function
+    CMP_r8_gt -> "GX_TEV_COMP_R8_GT"
+  | CMP_r8_eq -> "GX_TEV_COMP_R8_EQ"
+  | CMP_gr16_gt -> "GX_TEV_COMP_GR16_GT"
+  | CMP_gr16_eq -> "GX_TEV_COMP_GR16_EQ"
+  | CMP_bgr24_gt -> "GX_TEV_COMP_BGR24_GT"
+  | CMP_bgr24_eq -> "GX_TEV_COMP_BGR24_EQ"
+  | CMP_rgb8_gt -> "GX_TEV_COMP_RGB8_GT"
+  | CMP_rgb8_eq -> "GX_TEV_COMP_RGB8_EQ"
+
+let print_tev_colour_setup stage_num stage_op =
+  match stage_op with
+    Arith ar -> 
+      Printf.printf "GX_SetTevColorIn (%s, %s, %s, %s, %s);\n"
+        (string_of_stagenum stage_num) (string_of_tev_input ar.a)
+	(string_of_tev_input ar.b) (string_of_tev_input ar.c)
+	(string_of_tev_input ar.d);
+      Printf.printf "GX_SetTevColorOp (%s, %s, %s, %s, %s, %s);\n"
+        (string_of_stagenum stage_num) (string_of_tev_op ar.op)
+	(string_of_bias ar.bias) (string_of_scale ar.scale)
+	(string_of_clamp ar.clamp) (string_of_result ar.result)
+  | Comp cmp ->
+      Printf.printf "GX_SetTevColorIn (%s, %s, %s, %s, %s);\n"
+        (string_of_stagenum stage_num) (string_of_tev_input cmp.cmp_a)
+	(string_of_tev_input cmp.cmp_b) (string_of_tev_input cmp.cmp_c)
+	(string_of_tev_input cmp.cmp_d);
+      Printf.printf
+        "GX_SetTevColorOp (%s, %s, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, %s);\n"
+        (string_of_stagenum stage_num) (string_of_cmp_op cmp.cmp_op)
+	(string_of_result cmp.cmp_result)
+
+let _ =
+  let parsed_stages = parse_string stdin in
+  let stage_infos = List.map (fun (stage, expr) -> compile_expr stage expr)
+			     parsed_stages in
+  List.iter
+    (fun (stagenum, info) ->
+      print_tev_colour_setup stagenum info.stage_operation)
+    stage_infos
