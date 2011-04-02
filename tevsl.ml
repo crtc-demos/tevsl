@@ -96,10 +96,10 @@ let rewrite_const expr ~alpha =
   | Float 0.375 -> set_const KCSEL_3_8
   | Float 0.25 -> set_const KCSEL_1_4
   | Float 0.125 -> set_const KCSEL_1_8
-  | Var_ref K0 -> set_const KCSEL_K0
-  | Var_ref K1 -> set_const KCSEL_K1
-  | Var_ref K2 -> set_const KCSEL_K2
-  | Var_ref K3 -> set_const KCSEL_K3
+  | Var_ref K0 when not alpha -> set_const KCSEL_K0
+  | Var_ref K1 when not alpha -> set_const KCSEL_K1
+  | Var_ref K2 when not alpha -> set_const KCSEL_K2
+  | Var_ref K3 when not alpha -> set_const KCSEL_K3
   | Select (Var_ref K0, [| R |]) -> set_const KCSEL_K0_R
   | Select (Var_ref K1, [| R |]) -> set_const KCSEL_K1_R
   | Select (Var_ref K2, [| R |]) -> set_const KCSEL_K2_R
@@ -761,6 +761,49 @@ let string_of_colour_chan = function
   | AlphaBumpN -> "GX_ALPHA_BUMPN"
   | c -> failwith "Bad colour channel"
 
+(* These happen to have the same values for colours & alphas.  *)
+let string_of_const cst alpha =
+  let ac = if alpha then "GX_TEV_KASEL_" else "GX_TEV_KCSEL_" in
+  let tail = match cst with
+    KCSEL_1 -> "1"
+  | KCSEL_7_8 -> "7_8"
+  | KCSEL_3_4 -> "3_4"
+  | KCSEL_5_8 -> "5_8"
+  | KCSEL_1_2 -> "1_2"
+  | KCSEL_3_8 -> "3_8"
+  | KCSEL_1_4 -> "1_4"
+  | KCSEL_1_8 -> "1_8"
+  | KCSEL_K0 when not alpha -> "K0"
+  | KCSEL_K1 when not alpha -> "K1"
+  | KCSEL_K2 when not alpha -> "K2"
+  | KCSEL_K3 when not alpha -> "K3"
+  | KCSEL_K0_R -> "K0_R"
+  | KCSEL_K1_R -> "K1_R"
+  | KCSEL_K2_R -> "K2_R"
+  | KCSEL_K3_R -> "K3_R"
+  | KCSEL_K0_G -> "K0_G"
+  | KCSEL_K1_G -> "K1_G"
+  | KCSEL_K2_G -> "K2_G"
+  | KCSEL_K3_G -> "K3_G"
+  | KCSEL_K0_B -> "K0_B"
+  | KCSEL_K1_B -> "K1_B"
+  | KCSEL_K2_B -> "K2_B"
+  | KCSEL_K3_B -> "K3_B"
+  | KCSEL_K0_A -> "K0_A"
+  | KCSEL_K1_A -> "K1_A"
+  | KCSEL_K2_A -> "K2_A"
+  | KCSEL_K3_A -> "K3_A"
+  | _ -> failwith "Bad constant" in
+  ac ^ tail
+
+let print_const_setup stage cst ~alpha =
+  if alpha then
+    Printf.printf "GX_SetTevKAlphaSel (%s, %s);\n" (string_of_stagenum stage)
+      (string_of_const cst true)
+  else
+    Printf.printf "GX_SetTevKColorSel (%s, %s);\n" (string_of_stagenum stage)
+      (string_of_const cst false)
+
 (* Print a normal (direct) texture lookup order.  *)
 
 let print_tev_order stage_num texmap colchan =
@@ -814,13 +857,23 @@ let _ =
       | None, None -> failwith "Missing tev stage!" in
     print_tev_order i texmap colchan;
     begin match stage_arr.(i).colour_part with
-      Some cpart -> print_tev_setup i cpart.stage_operation
-				    string_of_tev_input ~alpha:false
+      Some cpart ->
+        begin match cpart.const_usage with
+	  Some cst -> print_const_setup i cst ~alpha:false
+	| None -> ()
+	end;
+        print_tev_setup i cpart.stage_operation string_of_tev_input
+			~alpha:false
     | None -> ()
     end;
     begin match stage_arr.(i).alpha_part with
-      Some apart -> print_tev_setup i apart.stage_operation
-				    string_of_tev_alpha_input ~alpha:true
+      Some apart ->
+        begin match apart.const_usage with
+	  Some cst -> print_const_setup i cst ~alpha:true
+	| None -> ()
+	end;
+        print_tev_setup i apart.stage_operation string_of_tev_alpha_input
+			~alpha:true
     | None -> ()
     end;
     print_newline ()
