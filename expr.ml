@@ -14,6 +14,7 @@ type expr =
   | Cgt of expr * expr
   | Clt of expr * expr
   | Select of expr * lane_select array
+  | Concat of expr * lane_select array
   | Ternary of expr * expr * expr
   | Texmap of int * int
 

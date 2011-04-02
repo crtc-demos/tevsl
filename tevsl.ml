@@ -36,7 +36,7 @@ let cvar_of_expr = function
   | Float x -> raise (Bad_float x)
   | _ -> raise Bad_cvar
 
-exception Bad_avar
+exception Bad_avar of expr
 
 let avar_of_expr = function
     Var_ref Aprev -> CA_aprev
@@ -47,7 +47,7 @@ let avar_of_expr = function
   | Var_ref Rasa -> CA_rasa
   | Var_ref Extracted_const -> CA_const
   | Int 0l | Float 0.0 -> CA_zero
-  | _ -> raise Bad_avar
+  | x -> raise (Bad_avar x)
 
 exception Bad_scale
 
@@ -88,7 +88,8 @@ let rewrite_const expr ~alpha =
   | Cgt (a, b) -> Cgt (scan a, scan b)
   | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Float 1.0 when alpha -> set_const KCSEL_1
+  | Float 1.0
+  | Int 1l when alpha -> set_const KCSEL_1
   | Float 0.875 -> set_const KCSEL_7_8
   | Float 0.75 -> set_const KCSEL_3_4
   | Float 0.625 -> set_const KCSEL_5_8
@@ -116,6 +117,7 @@ let rewrite_const expr ~alpha =
   | Select (Var_ref K1, [| A |]) -> set_const KCSEL_K1_A
   | Select (Var_ref K2, [| A |]) -> set_const KCSEL_K2_A
   | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
+  | Concat (e, ls) -> Concat (scan e, ls)
   | Float x -> Float x
   | Int x -> Int x
   | Var_ref x -> Var_ref x
@@ -182,7 +184,8 @@ let rewrite_swap_tables expr =
       set_ras lx; Select (Var_ref Rasc, default_swap lx)
   | Select (Var_ref Rasa, lx) ->
       set_ras lx; Select (Var_ref Rasa, default_swap lx)
-  | Select (x, lx) -> Select (scan x, lx) in
+  | Select (x, lx) -> Select (scan x, lx)
+  | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
   expr', !texswap, !rasswap
 
@@ -214,7 +217,8 @@ let rewrite_texmaps expr ~alpha =
       set_texmap m c; if alpha then Var_ref Texa else Var_ref Texc
   | Float x -> Float x
   | Int x -> Int x
-  | Select (v, lx) -> Select (scan v, lx) in
+  | Select (v, lx) -> Select (scan v, lx)
+  | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
   expr', !texmap_texcoord
 
@@ -258,7 +262,8 @@ let rewrite_colchans expr ~alpha =
   | Texmap (m, c) -> Texmap (m, c)
   | Float x -> Float x
   | Int x -> Int x
-  | Select (v, lx) -> Select (scan v, lx) in
+  | Select (v, lx) -> Select (scan v, lx)
+  | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
   expr', !colchan
 
@@ -296,17 +301,21 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	      scale = scale_of_expr tevscale;
 	      clamp = false;
 	      result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| R |]),
-				       Select (b, [| R |])),
-				  c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (a, [| R |])
+					   | Concat (a, [| R |])),
+					  (Select (b, [| R |])
+					   | Concat (b, [| R |]))),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| R |]),
-				       Select (b, [| R |])),
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (a, [| R |])
+					   | Concat (a, [| R |])),
+					  (Select (b, [| R |])
+					   | Concat (b, [| R |]))),
 				  c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -314,8 +323,8 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| G; R |]),
-				       Select (b, [| G; R |])),
+  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| G; R |]),
+					  Concat (b, [| G; R |])),
 				  c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -323,8 +332,8 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| G; R |]),
-				       Select (b, [| G; R |])),
+  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| G; R |]),
+					  Concat (b, [| G; R |])),
 				  c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -332,8 +341,8 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| B; G; R |]),
-				       Select (b, [| B; G; R |])),
+  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| B; G; R |]),
+					  Concat (b, [| B; G; R |])),
 				  c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -341,33 +350,37 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| B; G; R |]),
-				       Select (b, [| B; G; R |])),
-				  c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| B; G; R |]),
+					  Concat (b, [| B; G; R |])),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [||]),
-				       Select (b, [||])), c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| R; G; B |]),
+					  Select (b, [| R; G; B |])),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [||]), Select (b, [||])),
-				  c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| R; G; B |]),
+					  Select (b, [| R; G; B |])),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| A |]),
-				       Select (b, [| A |])),
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (a, [| A |])
+					   | Concat (a, [| A |])),
+					  (Select (b, [| A |])
+					   | Concat (b, [| A |]))),
 				  c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -375,8 +388,10 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| A |]),
-				       Select (b, [| A |])),
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (a, [| A |])
+					   | Concat (a, [| A |])),
+					  (Select (b, [| A |])
+					   | Concat (b, [| A |]))),
 				  c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -519,6 +534,7 @@ let rec rewrite_rationals = function
   | Var_ref x -> Var_ref x
   | Texmap (m, c) -> Texmap (m, c)
   | Select (x, lx) -> Select (rewrite_rationals x, lx)
+  | Concat (x, lx) -> Concat (rewrite_rationals x, lx)
 
 (* FIXME: The "D" input has more significant bits than the A, B and C inputs:
    10-bit signed versus 8-bit unsigned.  This rewriting function doesn't really
@@ -569,6 +585,100 @@ let rec rewrite_expr = function
   | Clamp expr -> Clamp (rewrite_expr expr)
   | x -> x
 
+let string_of_var_param = function
+    Cprev -> "cprev"
+  | Aprev -> "aprev"
+  | C0 -> "c0"
+  | A0 -> "a0"
+  | C1 -> "c1"
+  | A1 -> "a1"
+  | C2 -> "c2"
+  | A2 -> "a2"
+  | K0 -> "k0"
+  | K1 -> "k1"
+  | K2 -> "k2"
+  | K3 -> "k3"
+  | Colour0 -> "colour0"
+  | Alpha0 -> "alpha0"
+  | Colour0A0 -> "colour0a0"
+  | Colour1 -> "colour1"
+  | Alpha1 -> "alpha1"
+  | Colour1A1 -> "colour1a1"
+  | ColourZero -> "colourzero"
+  | AlphaBump -> "alphabump"
+  | AlphaBumpN -> "alphabumpn"
+  | Texc -> "texc"
+  | Texa -> "texa"
+  | Rasc -> "rasc"
+  | Rasa -> "rasa"
+  | Extracted_const -> "extracted_const"
+
+let string_of_laneselect lsa =
+  Array.fold_left
+    (fun acc lane -> match lane with
+       R -> acc ^ "r"
+     | G -> acc ^ "g"
+     | B -> acc ^ "b"
+     | A -> acc ^ "a")
+    ""
+    lsa
+
+let string_of_destvar = function
+    Tevprev -> "tevprev"
+  | Tevreg0 -> "tevreg0"
+  | Tevreg1 -> "tevreg1"
+  | Tevreg2 -> "tevreg2"
+
+let string_of_expression expr =
+  let b = Buffer.create 20 in
+  let rec add_binop x op y =
+    Buffer.add_char b '(';
+    scan x;
+    Buffer.add_string b op;
+    scan y;
+    Buffer.add_char b ')'
+  and scan = function
+    Int i -> Buffer.add_string b (Int32.to_string i)
+  | Float f -> Buffer.add_string b (string_of_float f)
+  | Plus (a, b) -> add_binop a " + " b
+  | Minus (a, b) -> add_binop a " - " b
+  | Mult (a, b) -> add_binop a " * " b
+  | Divide (a, b) -> add_binop a " / " b
+  | Var_ref r -> Buffer.add_string b (string_of_var_param r)
+  | Neg a -> Buffer.add_string b "-("; scan a; Buffer.add_char b ')'
+  | Clamp a -> Buffer.add_string b "clamp("; scan a; Buffer.add_char b ')'
+  | Mix (x, y, z) ->
+      Buffer.add_string b "mix("; scan x; Buffer.add_char b ','; scan y;
+      Buffer.add_char b ','; scan z; Buffer.add_char b ')'
+  | Assign (dv, lsa, e) ->
+      Buffer.add_string b (string_of_destvar dv);
+      Buffer.add_char b '.';
+      Buffer.add_string b (string_of_laneselect lsa);
+      Buffer.add_string b "=";
+      scan e
+  | Ceq (a, b) -> add_binop a " == " b
+  | Cgt (a, b) -> add_binop a " > " b
+  | Clt (a, b) -> add_binop a " < " b
+  | Select (e, lsa) ->
+      scan e;
+      Buffer.add_char b '.';
+      Buffer.add_string b (string_of_laneselect lsa)
+  | Concat (e, lsa) ->
+      scan e;
+      Buffer.add_char b '{';
+      Buffer.add_string b (string_of_laneselect lsa);
+      Buffer.add_char b '}'
+  | Ternary (x, y, z) ->
+      scan x;
+      Buffer.add_string b " ? ";
+      scan y;
+      Buffer.add_string b " : ";
+      scan z
+  | Texmap (x, y) ->
+      Buffer.add_string b (Printf.sprintf "texmap%d[texcoord%d]" x y) in
+  scan expr;
+  Buffer.contents b
+
 type 'ac stage_info = {
   stage_operation : 'ac tev;
   const_usage : const_setting option;
@@ -598,8 +708,8 @@ let print_num_stages ns =
 
 exception Cant_match_stage of int
 
-let compile_expr stage expr ~alpha ac_var_of_expr =
-  let expr = rewrite_rationals expr in
+let compile_expr stage orig_expr ~alpha ac_var_of_expr =
+  let expr = rewrite_rationals orig_expr in
   let expr = rewrite_mix expr in
   let expr, const_extr = rewrite_const expr ~alpha in
   let expr, texmap_texcoord = rewrite_texmaps expr ~alpha in
@@ -632,7 +742,12 @@ let compile_expr stage expr ~alpha ac_var_of_expr =
 	tex_swaps = texswap;
 	ras_swaps = rasswap
       }
-  | None -> raise (Cant_match_stage stage)
+  | None ->
+      Printf.fprintf stderr "Attempting to match: '%s'\n"
+		     (string_of_expression expr);
+      Printf.fprintf stderr "Rewritten from original: '%s'\n"
+		     (string_of_expression orig_expr);
+      raise (Cant_match_stage stage)
 
 let combine_tev_orders col_order alpha_order =
   let combined_colchan =
@@ -662,24 +777,32 @@ let array_of_stages stage_defs ns =
     Array.init ns (fun _ -> { colour_part = None; alpha_part = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
-      List.iter
-        (fun stage_expr ->
-          let stage_expr = default_assign stage_expr in
-          match stage_expr with
-	    Assign (_, [| A |], _) ->
-	      let comp = compile_expr sn stage_expr ~alpha:true avar_of_expr in
-	      arr.(sn).alpha_part <- Some comp
-	  | Assign (_, [| R; G; B |], _) ->
-	      let comp = compile_expr sn stage_expr ~alpha:false cvar_of_expr in
-	      arr.(sn).colour_part <- Some comp
-	  | Assign (_, [| R; G; B; A |], _) ->
-	      (* Not entirely sure if it's sensible to allow this.  *)
-	      let ccomp = compile_expr sn stage_expr ~alpha:false cvar_of_expr
-	      and acomp = compile_expr sn stage_expr ~alpha:true avar_of_expr in
-	      arr.(sn).alpha_part <- Some acomp;
-	      arr.(sn).colour_part <- Some ccomp
-	  | _ -> failwith "Bad stage expression")
-	stage_exprs)
+      try
+        List.iter
+          (fun stage_expr ->
+            let stage_expr = default_assign stage_expr in
+            match stage_expr with
+	      Assign (_, [| A |], _) ->
+		let comp =
+		  compile_expr sn stage_expr ~alpha:true avar_of_expr in
+		arr.(sn).alpha_part <- Some comp
+	    | Assign (_, [| R; G; B |], _) ->
+		let comp =
+		  compile_expr sn stage_expr ~alpha:false cvar_of_expr in
+		arr.(sn).colour_part <- Some comp
+	    | Assign (_, [| R; G; B; A |], _) ->
+		(* Not entirely sure if it's sensible to allow this.  *)
+		let ccomp = compile_expr sn stage_expr ~alpha:false cvar_of_expr
+		and acomp =
+		  compile_expr sn stage_expr ~alpha:true avar_of_expr in
+		arr.(sn).alpha_part <- Some acomp;
+		arr.(sn).colour_part <- Some ccomp
+	    | _ -> failwith "Bad stage expression")
+	stage_exprs
+      with ((Bad_avar e) as exc) ->
+        let s = string_of_expression e in
+	Printf.fprintf stderr "In '%s':\n" s;
+	raise exc)
     stage_defs;
   arr
 

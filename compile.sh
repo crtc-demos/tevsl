@@ -5,7 +5,7 @@ if false; then
   OCAMLC=ocamlopt
   SUF=cmx
 else
-  OCAMLC=ocamlc
+  OCAMLC="ocamlc -g"
   SUF=cmo
 fi
 rm -f parser.ml parser.mli lexer.ml lexer.mli lexer.cm? parser.cm?

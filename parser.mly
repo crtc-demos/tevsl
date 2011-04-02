@@ -4,6 +4,7 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
+%token LBRACE RBRACE DOT
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD
@@ -53,7 +54,7 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | m = TEXMAP LSQUARE c = TEXCOORD RSQUARE
 					{ Expr.Texmap (m, c) }
 	  | MINUS e = stage_expr	{ Expr.Neg e }
-	  | a = DESTVAR c = CHANSELECT ASSIGN b = stage_expr
+	  | a = DESTVAR DOT c = CHANSELECT ASSIGN b = stage_expr
 					{ Expr.Assign (a, c, b) }
 	  | a = DESTVAR ASSIGN b = stage_expr
 					{ Expr.Assign (a,
@@ -72,8 +73,10 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | MIX LPAREN a = stage_expr COMMA b = stage_expr COMMA
 	    c = stage_expr RPAREN
 					{ Expr.Mix (a, b, c) }
-	  | e = stage_expr c = CHANSELECT
+	  | e = stage_expr DOT c = CHANSELECT
 					{ Expr.Select (e, c) }
+	  | e = stage_expr LBRACE c = CHANSELECT RBRACE
+					{ Expr.Concat (e, c) }
 ;
 
 %%

@@ -8,7 +8,7 @@ let floatnum = intnum "." intnum
 (* Presume GX_CC_ONE, GX_CC_HALF, GX_CC_KONST, GX_CC_ZERO are written as
    numbers.  *)
 
-let chanselect = "." ("r" | "g" | "b" | "a")+
+let chanselect = ("r" | "g" | "b" | "a")+
 
 (* We're British thankyou, allow proper spelling.  *)
 
@@ -108,6 +108,8 @@ rule token = parse
   | ")"		    { RPAREN }
   | "["		    { LSQUARE }
   | "]"		    { RSQUARE }
+  | "{"		    { LBRACE }
+  | "}"		    { RBRACE }
   | "="		    { ASSIGN }
   | ":"		    { COLON }
   | ";"		    { SEMICOLON }
@@ -115,9 +117,10 @@ rule token = parse
   | "?"		    { QUESTIONMARK }
   | "clamp"	    { CLAMP }
   | "mix"	    { MIX }
-  | chanselect as c { let arr = Array.create (String.length c - 1) Expr.R in
-		      for i = 1 to String.length c - 1 do
-		        arr.(i - 1) <- match c.[i] with
+  | "."		    { DOT }
+  | chanselect as c { let arr = Array.create (String.length c) Expr.R in
+		      for i = 0 to String.length c - 1 do
+		        arr.(i) <- match c.[i] with
 			  'r' -> Expr.R
 			| 'g' -> Expr.G
 			| 'b' -> Expr.B
