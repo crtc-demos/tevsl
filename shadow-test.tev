@@ -6,4 +6,4 @@ stage 1:
 
 stage 2:
   tevprev.rgb = clamp (mix (c0, colour0, cprev));
-  tevprev.a = alpha0;
+  tevprev.a = 1.0;

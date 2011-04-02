@@ -506,11 +506,24 @@ let rec rewrite_rationals = function
 
 (* FIXME: The "D" input has more significant bits than the A, B and C inputs:
    10-bit signed versus 8-bit unsigned.  This rewriting function doesn't really
-   understand that.  *)
+   understand that, so we may lose precision.  Maybe fix by introducing a new
+   "accumulate" operator?  *)
 
 let rec rewrite_expr = function
     Var_ref x ->
       Mult (Plus (Plus (Var_ref x,
+			Plus (Mult (Minus (Int 1l, Int 0l), Int 0l),
+			      Mult (Int 0l, Int 0l))),
+		  Int 0l),
+	    Int 1l)
+  | Int x ->
+      Mult (Plus (Plus (Int x,
+			Plus (Mult (Minus (Int 1l, Int 0l), Int 0l),
+			      Mult (Int 0l, Int 0l))),
+		  Int 0l),
+	    Int 1l)
+  | Float x ->
+      Mult (Plus (Plus (Float x,
 			Plus (Mult (Minus (Int 1l, Int 0l), Int 0l),
 			      Mult (Int 0l, Int 0l))),
 		  Int 0l),
@@ -604,8 +617,30 @@ let compile_expr stage expr ~alpha =
       }
   | None -> raise (Cant_match_stage stage)
 
+let combine_tev_orders col_order alpha_order =
+  let combined_colchan =
+    match col_order.colchan, alpha_order.colchan with
+      Some Colour0, Some Alpha0 -> Some Colour0A0
+    | Some Colour1, Some Alpha1 -> Some Colour1A1
+    | Some Alpha0, Some Alpha0 -> Some Alpha0
+    | Some Alpha1, Some Alpha1 -> Some Alpha1
+    | Some x, None -> Some x
+    | None, Some x -> Some x
+    | None, None -> None
+    | _ -> failwith "Invalid colour/alpha channel combination"
+  and combined_texmap =
+    match col_order.texmap, alpha_order.texmap with
+      Some (ctm, ctc), Some (atm, atc) when ctm = atm && ctc = atc ->
+        Some (ctm, ctc)
+    | Some x, None -> Some x
+    | None, Some x -> Some x
+    | None, None -> None
+    | _ -> failwith "Invalid texmap/texcoord combination" in
+  combined_texmap, combined_colchan
+
 let array_of_stages stage_defs ns =
-  let arr = Array.make ns { colour_part = None; alpha_part = None } in
+  let arr =
+    Array.init ns (fun _ -> { colour_part = None; alpha_part = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
       List.iter
@@ -704,24 +739,28 @@ let print_tev_order stage_num texmap colchan =
   Printf.printf "GX_SetTevOrder (%s, %s, %s, %s);\n"
     (string_of_stagenum stage_num) tc tm cc
 
-let print_tev_colour_setup stage_num stage_op =
+let print_tev_setup stage_num stage_op ~alpha =
+  let infn, opfn = if alpha then
+    "GX_SetTevAlphaIn", "GX_SetTevAlphaOp"
+  else
+    "GX_SetTevColorIn", "GX_SetTevColorOp" in
   match stage_op with
     Arith ar -> 
-      Printf.printf "GX_SetTevColorIn (%s, %s, %s, %s, %s);\n"
+      Printf.printf "%s (%s, %s, %s, %s, %s);\n" infn
         (string_of_stagenum stage_num) (string_of_tev_input ar.a)
 	(string_of_tev_input ar.b) (string_of_tev_input ar.c)
 	(string_of_tev_input ar.d);
-      Printf.printf "GX_SetTevColorOp (%s, %s, %s, %s, %s, %s);\n"
+      Printf.printf "%s (%s, %s, %s, %s, %s, %s);\n" opfn
         (string_of_stagenum stage_num) (string_of_tev_op ar.op)
 	(string_of_bias ar.bias) (string_of_scale ar.scale)
 	(string_of_clamp ar.clamp) (string_of_result ar.result)
   | Comp cmp ->
-      Printf.printf "GX_SetTevColorIn (%s, %s, %s, %s, %s);\n"
+      Printf.printf "%s (%s, %s, %s, %s, %s);\n" infn
         (string_of_stagenum stage_num) (string_of_tev_input cmp.cmp_a)
 	(string_of_tev_input cmp.cmp_b) (string_of_tev_input cmp.cmp_c)
 	(string_of_tev_input cmp.cmp_d);
       Printf.printf
-        "GX_SetTevColorOp (%s, %s, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, %s);\n"
+        "%s (%s, %s, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, %s);\n" opfn
         (string_of_stagenum stage_num) (string_of_cmp_op cmp.cmp_op)
 	(string_of_result cmp.cmp_result)
 
@@ -732,10 +771,19 @@ let _ =
   print_newline ();
   let stage_arr = array_of_stages parsed_stages num_stages in
   for i = 0 to num_stages - 1 do
+    let texmap, colchan =
+      match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
+        None, Some ap -> ap.texmap, ap.colchan
+      | Some cp, None -> cp.texmap, cp.colchan
+      | Some cp, Some ap -> combine_tev_orders cp ap
+      | None, None -> failwith "Missing tev stage!" in
+    print_tev_order i texmap colchan;
     begin match stage_arr.(i).colour_part with
-      Some cpart ->
-        print_tev_order i cpart.texmap cpart.colchan;
-	print_tev_colour_setup i cpart.stage_operation
+      Some cpart -> print_tev_setup i cpart.stage_operation ~alpha:false
+    | None -> ()
+    end;
+    begin match stage_arr.(i).alpha_part with
+      Some apart -> print_tev_setup i apart.stage_operation ~alpha:true
     | None -> ()
     end;
     print_newline ()
