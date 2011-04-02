@@ -761,7 +761,7 @@ let string_of_colour_chan = function
   | AlphaBumpN -> "GX_ALPHA_BUMPN"
   | c -> failwith "Bad colour channel"
 
-(* These happen to have the same values for colours & alphas.  *)
+(* These happen to have mostly the same choices for colours & alphas.  *)
 let string_of_const cst alpha =
   let ac = if alpha then "GX_TEV_KASEL_" else "GX_TEV_KCSEL_" in
   let tail = match cst with
