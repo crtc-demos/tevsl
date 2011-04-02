@@ -1,8 +1,10 @@
 stage 0:
   tevprev.rgb = clamp (texmap0[texcoord0]);
+  tevprev.a = aprev;
 
 stage 1:
   tevprev.rgb = (texmap1[texcoord1].r > cprev.r) ? 1 : 0;
+  tevprev.a = aprev;
 
 stage 2:
   tevprev.rgb = clamp (mix (c0, colour0, cprev));

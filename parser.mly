@@ -57,7 +57,8 @@ stage_expr: n = INT			{ Expr.Int n }
 					{ Expr.Assign (a, c, b) }
 	  | a = DESTVAR ASSIGN b = stage_expr
 					{ Expr.Assign (a,
-					    [| Expr.R; Expr.G; Expr.B |], b) }
+					    [| Expr.R; Expr.G; Expr.B;
+					       Expr.A |], b) }
 	  | a = stage_expr EQ b = stage_expr
 					{ Expr.Ceq (a, b) }
 	  | a = stage_expr GT b = stage_expr

@@ -36,6 +36,19 @@ let cvar_of_expr = function
   | Float x -> raise (Bad_float x)
   | _ -> raise Bad_cvar
 
+exception Bad_avar
+
+let avar_of_expr = function
+    Var_ref Aprev -> CA_aprev
+  | Var_ref A0 -> CA_a0
+  | Var_ref A1 -> CA_a1
+  | Var_ref A2 -> CA_a2
+  | Var_ref Texa -> CA_texa
+  | Var_ref Rasa -> CA_rasa
+  | Var_ref Extracted_const -> CA_const
+  | Int 0l | Float 0.0 -> CA_zero
+  | _ -> raise Bad_avar
+
 exception Bad_scale
 
 let scale_of_expr = function
@@ -52,7 +65,7 @@ exception Too_many_constants
 (* Find special-valued "konst" constants in expression, and separate them
    out.  *)
 
-let rewrite_const expr =
+let rewrite_const expr ~alpha =
   let which_const = ref None in
   let set_const x =
     match !which_const with
@@ -75,11 +88,11 @@ let rewrite_const expr =
   | Cgt (a, b) -> Cgt (scan a, scan b)
   | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Float 1.0 -> set_const KCSEL_1
+  | Float 1.0 when alpha -> set_const KCSEL_1
   | Float 0.875 -> set_const KCSEL_7_8
   | Float 0.75 -> set_const KCSEL_3_4
   | Float 0.625 -> set_const KCSEL_5_8
-  (* | Float 0.5 -> set_const KCSEL_1_2  why do we ever need this?  *)
+  | Float 0.5 when alpha -> set_const KCSEL_1_2
   | Float 0.375 -> set_const KCSEL_3_8
   | Float 0.25 -> set_const KCSEL_1_4
   | Float 0.125 -> set_const KCSEL_1_8
@@ -175,7 +188,7 @@ let rewrite_swap_tables expr =
 
 exception Incompatible_texmaps
 
-let rewrite_texmaps expr =
+let rewrite_texmaps expr ~alpha =
   let texmap_texcoord = ref None in
   let set_texmap m c =
     match !texmap_texcoord with
@@ -197,7 +210,8 @@ let rewrite_texmaps expr =
   | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
   | Var_ref x -> Var_ref x
-  | Texmap (m, c) -> set_texmap m c; Var_ref Texc
+  | Texmap (m, c) ->
+      set_texmap m c; if alpha then Var_ref Texa else Var_ref Texc
   | Float x -> Float x
   | Int x -> Int x
   | Select (v, lx) -> Select (scan v, lx) in
@@ -235,7 +249,8 @@ let rewrite_colchans expr ~alpha =
   | Var_ref Alpha1 -> set_colchan Alpha1; Var_ref Rasa
   | Var_ref Colour1A1 ->
       set_colchan Colour1A1; if alpha then Var_ref Rasa else Var_ref Rasc
-  | Var_ref ColourZero -> set_colchan ColourZero; Var_ref Rasc
+  | Var_ref ColourZero ->
+      set_colchan ColourZero; if alpha then Var_ref Rasa else Var_ref Rasc
   | Var_ref AlphaBump -> set_colchan AlphaBump; Var_ref Rasa
   | Var_ref AlphaBumpN ->
       set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
@@ -249,17 +264,18 @@ let rewrite_colchans expr ~alpha =
 
 exception Unmatched_expr
 
-let rec arith_op_of_expr = function
+let rec arith_op_of_expr expr ac_var_of_expr =
+  match expr with
     Assign (dv, _, Mult (Plus
 		       (Plus
 		         (d, Plus (Mult (Minus (Int 1l, c), a),
 				   Mult (c2, b))),
 		        tevbias),
 		      tevscale)) when c = c2 ->
-      Arith { a = cvar_of_expr a;
-              b = cvar_of_expr b;
-	      c = cvar_of_expr c;
-	      d = cvar_of_expr d;
+      Arith { a = ac_var_of_expr a;
+              b = ac_var_of_expr b;
+	      c = ac_var_of_expr c;
+	      d = ac_var_of_expr d;
 	      op = OP_add;
 	      bias = bias_of_expr tevbias;
 	      scale = scale_of_expr tevscale;
@@ -271,10 +287,10 @@ let rec arith_op_of_expr = function
 				   Mult (c2, b))),
 		        tevbias),
 		      tevscale)) when c = c2 ->
-      Arith { a = cvar_of_expr a;
-              b = cvar_of_expr b;
-	      c = cvar_of_expr c;
-	      d = cvar_of_expr d;
+      Arith { a = ac_var_of_expr a;
+              b = ac_var_of_expr b;
+	      c = ac_var_of_expr c;
+	      d = ac_var_of_expr d;
 	      op = OP_sub;
 	      bias = bias_of_expr tevbias;
 	      scale = scale_of_expr tevscale;
@@ -283,93 +299,93 @@ let rec arith_op_of_expr = function
   | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| R |]),
 				       Select (b, [| R |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_gt;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| R |]),
 				       Select (b, [| R |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_eq;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| G; R |]),
 				       Select (b, [| G; R |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_gt;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| G; R |]),
 				       Select (b, [| G; R |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_eq;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| B; G; R |]),
 				       Select (b, [| B; G; R |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_gt;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| B; G; R |]),
 				       Select (b, [| B; G; R |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_eq;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [||]),
 				       Select (b, [||])), c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [||]), Select (b, [||])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_eq;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| A |]),
 				       Select (b, [| A |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
   | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| A |]),
 				       Select (b, [| A |])),
 				  c, Int 0l))) ->
-      Comp { cmp_a = cvar_of_expr a;
-	     cmp_b = cvar_of_expr b;
-	     cmp_c = cvar_of_expr c;
-	     cmp_d = cvar_of_expr d;
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
+	     cmp_c = ac_var_of_expr c;
+	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_eq;
 	     cmp_result = dv }
   | Assign (dv, cs, Clamp expr) ->
-      let inner = arith_op_of_expr (Assign (dv, cs, expr)) in
+      let inner = arith_op_of_expr (Assign (dv, cs, expr)) ac_var_of_expr in
       begin match inner with
         Arith foo -> Arith { foo with clamp = true }
       | _ -> raise Unmatched_expr
@@ -451,7 +467,7 @@ let commutative_variants e =
 
 let default_assign = function
     Assign (dv, cs, x) as d -> d
-  | x -> Assign (Tevprev, [| R; G; B |], x)
+  | x -> Assign (Tevprev, [| R; G; B; A |], x)
 
 (* Rewrite mix instructions as "(1-c) * a + b * c" and "a < b" as "b > a".  *)
 
@@ -553,8 +569,8 @@ let rec rewrite_expr = function
   | Clamp expr -> Clamp (rewrite_expr expr)
   | x -> x
 
-type stage_info = {
-  stage_operation : tev;
+type 'ac stage_info = {
+  stage_operation : 'ac tev;
   const_usage : const_setting option;
   texmap : (int * int) option;
   colchan: var_param option;
@@ -563,8 +579,8 @@ type stage_info = {
 }
 
 type stage_col_alpha_parts = {
-  mutable colour_part : stage_info option;
-  mutable alpha_part : stage_info option
+  mutable colour_part : cvar_setting stage_info option;
+  mutable alpha_part : avar_setting stage_info option
 }
 
 let parse_channel c =
@@ -582,11 +598,11 @@ let print_num_stages ns =
 
 exception Cant_match_stage of int
 
-let compile_expr stage expr ~alpha =
+let compile_expr stage expr ~alpha ac_var_of_expr =
   let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
-  let expr, const_extr = rewrite_const expr in
-  let expr, texmap_texcoord = rewrite_texmaps expr in
+  let expr, const_extr = rewrite_const expr ~alpha in
+  let expr, texmap_texcoord = rewrite_texmaps expr ~alpha in
   let expr, colchan = rewrite_colchans expr ~alpha in
   let expr, texswap, rasswap = rewrite_swap_tables expr in
   let comm_variants = commutative_variants expr in
@@ -599,7 +615,8 @@ let compile_expr stage expr ~alpha =
 	    match variant with
 	      Assign (dv, cs, expr) ->
 	        let expr' = rewrite_expr expr in
-                Some (stage, arith_op_of_expr (Assign (dv, cs, expr')))
+                Some (stage,
+		      arith_op_of_expr (Assign (dv, cs, expr')) ac_var_of_expr)
 	    | _ -> raise Unmatched_expr
 	  with Unmatched_expr ->
 	    None)
@@ -624,6 +641,8 @@ let combine_tev_orders col_order alpha_order =
     | Some Colour1, Some Alpha1 -> Some Colour1A1
     | Some Alpha0, Some Alpha0 -> Some Alpha0
     | Some Alpha1, Some Alpha1 -> Some Alpha1
+    | Some Colour0A0, Some Colour0A0 -> Some Colour0A0
+    | Some Colour1A1, Some Colour1A1 -> Some Colour1A1
     | Some x, None -> Some x
     | None, Some x -> Some x
     | None, None -> None
@@ -648,11 +667,17 @@ let array_of_stages stage_defs ns =
           let stage_expr = default_assign stage_expr in
           match stage_expr with
 	    Assign (_, [| A |], _) ->
-	      let comp = compile_expr sn stage_expr ~alpha:true in
+	      let comp = compile_expr sn stage_expr ~alpha:true avar_of_expr in
 	      arr.(sn).alpha_part <- Some comp
 	  | Assign (_, [| R; G; B |], _) ->
-	      let comp = compile_expr sn stage_expr ~alpha:false in
+	      let comp = compile_expr sn stage_expr ~alpha:false cvar_of_expr in
 	      arr.(sn).colour_part <- Some comp
+	  | Assign (_, [| R; G; B; A |], _) ->
+	      (* Not entirely sure if it's sensible to allow this.  *)
+	      let ccomp = compile_expr sn stage_expr ~alpha:false cvar_of_expr
+	      and acomp = compile_expr sn stage_expr ~alpha:true avar_of_expr in
+	      arr.(sn).alpha_part <- Some acomp;
+	      arr.(sn).colour_part <- Some ccomp
 	  | _ -> failwith "Bad stage expression")
 	stage_exprs)
     stage_defs;
@@ -678,6 +703,16 @@ let string_of_tev_input = function
   | CC_half -> "GX_CC_HALF"
   | CC_const -> "GX_CC_KONST"
   | CC_zero -> "GX_CC_ZERO"
+
+let string_of_tev_alpha_input = function
+    CA_aprev -> "GX_CA_APREV"
+  | CA_a0 -> "GX_CA_A0"
+  | CA_a1 -> "GX_CA_A1"
+  | CA_a2 -> "GX_CA_A2"
+  | CA_texa -> "GX_CA_TEXA"
+  | CA_rasa -> "GX_CA_RASA"
+  | CA_const -> "GX_CA_KONST"
+  | CA_zero -> "GX_CA_ZERO"
 
 let string_of_tev_op = function
     OP_add -> "GX_TEV_ADD"
@@ -739,28 +774,28 @@ let print_tev_order stage_num texmap colchan =
   Printf.printf "GX_SetTevOrder (%s, %s, %s, %s);\n"
     (string_of_stagenum stage_num) tc tm cc
 
-let print_tev_setup stage_num stage_op ~alpha =
-  let infn, opfn = if alpha then
+let print_tev_setup stage_num stage_op string_of_ac_input ~alpha =
+  let acin, acop = if alpha then
     "GX_SetTevAlphaIn", "GX_SetTevAlphaOp"
   else
     "GX_SetTevColorIn", "GX_SetTevColorOp" in
   match stage_op with
     Arith ar -> 
-      Printf.printf "%s (%s, %s, %s, %s, %s);\n" infn
-        (string_of_stagenum stage_num) (string_of_tev_input ar.a)
-	(string_of_tev_input ar.b) (string_of_tev_input ar.c)
-	(string_of_tev_input ar.d);
-      Printf.printf "%s (%s, %s, %s, %s, %s, %s);\n" opfn
+      Printf.printf "%s (%s, %s, %s, %s, %s);\n" acin
+        (string_of_stagenum stage_num) (string_of_ac_input ar.a)
+	(string_of_ac_input ar.b) (string_of_ac_input ar.c)
+	(string_of_ac_input ar.d);
+      Printf.printf "%s (%s, %s, %s, %s, %s, %s);\n" acop
         (string_of_stagenum stage_num) (string_of_tev_op ar.op)
 	(string_of_bias ar.bias) (string_of_scale ar.scale)
 	(string_of_clamp ar.clamp) (string_of_result ar.result)
   | Comp cmp ->
-      Printf.printf "%s (%s, %s, %s, %s, %s);\n" infn
-        (string_of_stagenum stage_num) (string_of_tev_input cmp.cmp_a)
-	(string_of_tev_input cmp.cmp_b) (string_of_tev_input cmp.cmp_c)
-	(string_of_tev_input cmp.cmp_d);
+      Printf.printf "%s (%s, %s, %s, %s, %s);\n" acin
+        (string_of_stagenum stage_num) (string_of_ac_input cmp.cmp_a)
+	(string_of_ac_input cmp.cmp_b) (string_of_ac_input cmp.cmp_c)
+	(string_of_ac_input cmp.cmp_d);
       Printf.printf
-        "%s (%s, %s, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, %s);\n" opfn
+        "%s (%s, %s, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, %s);\n" acop
         (string_of_stagenum stage_num) (string_of_cmp_op cmp.cmp_op)
 	(string_of_result cmp.cmp_result)
 
@@ -779,11 +814,13 @@ let _ =
       | None, None -> failwith "Missing tev stage!" in
     print_tev_order i texmap colchan;
     begin match stage_arr.(i).colour_part with
-      Some cpart -> print_tev_setup i cpart.stage_operation ~alpha:false
+      Some cpart -> print_tev_setup i cpart.stage_operation
+				    string_of_tev_input ~alpha:false
     | None -> ()
     end;
     begin match stage_arr.(i).alpha_part with
-      Some apart -> print_tev_setup i apart.stage_operation ~alpha:true
+      Some apart -> print_tev_setup i apart.stage_operation
+				    string_of_tev_alpha_input ~alpha:true
     | None -> ()
     end;
     print_newline ()

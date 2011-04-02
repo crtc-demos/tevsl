@@ -92,12 +92,12 @@ and const_setting =
     tevregid = (d [+/-] ((1-c)*a + c*b) + tevbias) * tevscale
 *)
 
-type arith_op =
+type 'ac_var_setting arith_op =
   {
-    a : var_setting;
-    b : var_setting;
-    c : var_setting;
-    d : var_setting;
+    a : 'ac_var_setting;
+    b : 'ac_var_setting;
+    c : 'ac_var_setting;
+    d : 'ac_var_setting;
     op : tev_op;
     bias : bias_values;
     scale : scale_values;
@@ -109,17 +109,17 @@ type arith_op =
     tevregid = d + ((a OP b) ? c : 0)
 *)
 
-and compare_op =
+and 'ac_var_setting compare_op =
   {
-    cmp_a : var_setting;
-    cmp_b : var_setting;
-    cmp_c : var_setting;
-    cmp_d : var_setting;
+    cmp_a : 'ac_var_setting;
+    cmp_b : 'ac_var_setting;
+    cmp_c : 'ac_var_setting;
+    cmp_d : 'ac_var_setting;
     cmp_op : tev_cmp_op;
     cmp_result : dest_var
   }
 
-and var_setting =
+and cvar_setting =
     CC_cprev
   | CC_aprev
   | CC_c0
@@ -136,6 +136,16 @@ and var_setting =
   | CC_half
   | CC_const
   | CC_zero
+
+and avar_setting =
+    CA_aprev
+  | CA_a0
+  | CA_a1
+  | CA_a2
+  | CA_texa
+  | CA_rasa
+  | CA_const
+  | CA_zero
 
 and tev_op =
     OP_add
@@ -162,7 +172,7 @@ and scale_values =
   | CS_scale_4
   | CS_divide_2
 
-and tev =
-    Arith of arith_op
-  | Comp of compare_op
+and 'av_tev tev =
+    Arith of 'av_tev arith_op
+  | Comp of 'av_tev compare_op
 
