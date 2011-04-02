@@ -10,6 +10,10 @@ let floatnum = intnum "." intnum
 
 let chanselect = "." ("r" | "g" | "b" | "a")+
 
+(* We're British thankyou, allow proper spelling.  *)
+
+let colour = "colour" | "color"
+
 let var = "cprev"
         | "aprev"
 	| "c0"
@@ -22,10 +26,19 @@ let var = "cprev"
 	| "k1"
 	| "k2"
 	| "k3"
-	| "texc"
+	| colour "0"
+	| "alpha0"
+	| colour "0a0"
+	| colour "1"
+	| "alpha1"
+	| colour "1a1"
+	| colour "zero"
+	| "alphabump"
+	| "alphabumpn"
+     (* | "texc"
 	| "texa"
 	| "rasc"
-	| "rasa"
+	| "rasa" *)
 
 let destvar = "tevprev"
             | "tevreg0"
@@ -50,10 +63,19 @@ rule token = parse
 	| "k1" -> Expr.K1
 	| "k2" -> Expr.K2
 	| "k3" -> Expr.K3
-	| "texc" -> Expr.Texc
+	| "colour0" | "color0" -> Expr.Colour0
+	| "alpha0" -> Expr.Alpha0
+	| "colour0a0" | "color0a0" -> Expr.Colour0A0
+	| "colour1" | "color1" -> Expr.Colour1
+	| "alpha1" -> Expr.Alpha1
+	| "colour1a1" | "color1a1" -> Expr.Colour1A1
+	| "colourzero" | "colorzero" -> Expr.ColourZero
+	| "alphabump" -> Expr.AlphaBump
+	| "alphabumpn" -> Expr.AlphaBumpN
+     (* | "texc" -> Expr.Texc
 	| "texa" -> Expr.Texa
 	| "rasc" -> Expr.Rasc
-	| "rasa" -> Expr.Rasa
+	| "rasa" -> Expr.Rasa *)
 	| _ -> failwith "Bad variable" in
 	VAR vt
       }
@@ -67,6 +89,10 @@ rule token = parse
 	| _ -> failwith "Bad dest variable" in
 	DESTVAR vt
       }
+  | "texmap" (intnum as n)
+		    { TEXMAP (int_of_string n) }
+  | "texcoord" (intnum as n)
+		    { TEXCOORD (int_of_string n) }
   | "stage"	    { STAGE }
   | "+"		    { PLUS }
   | "-"		    { MINUS }
@@ -74,10 +100,14 @@ rule token = parse
   | "/"		    { DIVIDE }
   | ">"		    { GT }
   | "<"		    { LT }
+  | ">="	    { GTE }
+  | "<="	    { LTE }
   | "=="	    { EQ }
   | "!="	    { NE }
   | "("		    { LPAREN }
   | ")"		    { RPAREN }
+  | "["		    { LSQUARE }
+  | "]"		    { RSQUARE }
   | "="		    { ASSIGN }
   | ":"		    { COLON }
   | ";"		    { SEMICOLON }
@@ -95,5 +125,6 @@ rule token = parse
 			| _ -> failwith "Bad channel selector"
 		      done;
 		      CHANSELECT arr }
-  | "\n"	    { EOL }
-  | (" "|"\t")+	    { token lexbuf }
+  | (" "|"\t"|"\n")+
+  		    { token lexbuf }
+  | eof             { EOF }

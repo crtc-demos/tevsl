@@ -2,10 +2,11 @@
 
 %}
 
-%token EOL ASSIGN RPAREN LPAREN NE EQ LT GT DIVIDE MULT PLUS MINUS STAGE COLON
-%token SEMICOLON QUESTIONMARK CLAMP MIX COMMA
+%token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
+%token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
 %token <int32> INT
 %token <float> FLOAT
+%token <int> TEXMAP TEXCOORD
 %token <Expr.var_param> VAR
 %token <Expr.dest_var> DESTVAR
 %token <Expr.lane_select array> CHANSELECT
@@ -15,20 +16,25 @@
 %left PLUS MINUS
 %left MULT DIVIDE
 
-%start <(int32 * Expr.expr) list> stage_defs
+%start <(int * Expr.expr list) list> stage_defs
 
 %%
 
-stage_defs: option(EOL) 		{ [] }
-	  | s = stage_def option(EOL) ss = stage_defs
+stage_defs: EOF 			{ [] }
+	  | s = stage_def ss = stage_defs
 					{ s :: ss }
 ;
 
-stage_def: sn = stage_num se = stage_expr SEMICOLON
-					{ (sn, se) }
+stage_def: sn = stage_num ses = stage_exprs
+					{ (sn, ses) }
 ;
 
-stage_num: STAGE n = INT COLON		{ n }
+stage_num: STAGE n = INT COLON		{ Int32.to_int n }
+;
+
+stage_exprs: /* empty */		{ [] }
+	   | se = stage_expr SEMICOLON ss = stage_exprs
+					{ se :: ss }
 ;
 
 stage_expr: n = INT			{ Expr.Int n }
@@ -44,9 +50,14 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | LPAREN e = stage_expr RPAREN
 	  				{ e }
 	  | v = VAR 			{ Expr.Var_ref v }
+	  | m = TEXMAP LSQUARE c = TEXCOORD RSQUARE
+					{ Expr.Texmap (m, c) }
 	  | MINUS e = stage_expr	{ Expr.Neg e }
+	  | a = DESTVAR c = CHANSELECT ASSIGN b = stage_expr
+					{ Expr.Assign (a, c, b) }
 	  | a = DESTVAR ASSIGN b = stage_expr
-					{ Expr.Assign (a, b) }
+					{ Expr.Assign (a,
+					    [| Expr.R; Expr.G; Expr.B |], b) }
 	  | a = stage_expr EQ b = stage_expr
 					{ Expr.Ceq (a, b) }
 	  | a = stage_expr GT b = stage_expr

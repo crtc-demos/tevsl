@@ -9,12 +9,13 @@ type expr =
   | Neg of expr
   | Clamp of expr
   | Mix of expr * expr * expr
-  | Assign of dest_var * expr
+  | Assign of dest_var * lane_select array * expr
   | Ceq of expr * expr
   | Cgt of expr * expr
   | Clt of expr * expr
   | Select of expr * lane_select array
   | Ternary of expr * expr * expr
+  | Texmap of int * int
 
 and lane_select = R | G | B | A
 
@@ -31,6 +32,15 @@ and var_param =
   | K1
   | K2
   | K3
+  | Colour0
+  | Alpha0
+  | Colour0A0
+  | Colour1
+  | Alpha1
+  | Colour1A1
+  | ColourZero
+  | AlphaBump
+  | AlphaBumpN
   | Texc
   | Texa
   | Rasc
