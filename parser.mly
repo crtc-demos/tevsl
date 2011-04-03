@@ -76,7 +76,9 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | e = stage_expr DOT c = CHANSELECT
 					{ Expr.Select (e, c) }
 	  | e = stage_expr LBRACE c = CHANSELECT RBRACE
-					{ Expr.Concat (e, c) }
+					{ Expr.Concat (e,
+					    Array.of_list (List.rev
+					      (Array.to_list c))) }
 ;
 
 %%

@@ -128,10 +128,10 @@ let rewrite_const expr ~alpha =
 
 exception Incompatible_swaps
 
-let rewrite_swap_tables expr =
+let rewrite_swap_tables expr ~alpha =
   let texswap = ref None
   and rasswap = ref None in
-  let set_tex t =
+  let set_cat_tex t =
     match !texswap with
       None ->
         begin match t with
@@ -142,7 +142,16 @@ let rewrite_swap_tables expr =
 	| _ -> texswap := Some t
 	end
     | Some o -> if o <> t then raise Incompatible_swaps in
-  let set_ras r =
+  let set_tex t =
+    match !texswap with
+      None ->
+        begin match t with
+	| [| R; G; B |] when not alpha -> ()
+	| [| A |] when alpha -> ()
+	| _ -> texswap := Some t
+	end
+    | Some o -> if o <> t then raise Incompatible_swaps in
+  let set_cat_ras r =
     match !rasswap with
       None ->
         begin match r with
@@ -153,10 +162,25 @@ let rewrite_swap_tables expr =
 	| _ -> rasswap := Some r
 	end
     | Some o -> if o <> r then raise Incompatible_swaps in
+  let set_ras r =
+    match !rasswap with
+      None ->
+        begin match r with
+	| [| R; G; B |] when not alpha -> ()
+	| [| A |] when alpha -> ()
+	| _ -> rasswap := Some r
+	end
+    | Some o -> if o <> r then raise Incompatible_swaps in
+  let default_cat_swap = function
+    [| (R | G | B) |] -> [| R |]
+  | [| _; _ |] -> [| R; G |]
+  | [| _; _; _ |] -> [| R; G; B |]
+  | [| A |] -> [| A |]
+  | _ -> failwith "No default swap" in
   let default_swap = function
     [| (R | G | B) |] -> [| R |]
-  | [| _; _ |] -> [| G; R |]
-  | [| _; _; _ |] -> [| B; G; R |]
+  | [| _; _ |] -> [| R; G |]
+  | [| _; _; _ |] -> [| R; G; B |]
   | [| A |] -> [| A |]
   | _ -> failwith "No default swap" in
   let rec scan = function
@@ -176,6 +200,14 @@ let rewrite_swap_tables expr =
   | Texmap (m, c) -> Texmap (m, c)
   | Float x -> Float x
   | Int x -> Int x
+  | Concat (Var_ref Texc, lx) ->
+      set_cat_tex lx; Concat (Var_ref Texc, default_cat_swap lx)
+  | Concat (Var_ref Texa, lx) ->
+      set_cat_tex lx; Concat (Var_ref Texa, default_cat_swap lx)
+  | Concat (Var_ref Rasc, lx) ->
+      set_cat_ras lx; Concat (Var_ref Rasc, default_cat_swap lx)
+  | Concat (Var_ref Rasa, lx) ->
+      set_cat_ras lx; Concat (Var_ref Rasa, default_cat_swap lx)
   | Select (Var_ref Texc, lx) ->
       set_tex lx; Select (Var_ref Texc, default_swap lx)
   | Select (Var_ref Texa, lx) ->
@@ -316,42 +348,42 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 					   | Concat (a, [| R |])),
 					  (Select (b, [| R |])
 					   | Concat (b, [| R |]))),
-				  c, Int 0l))) ->
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| G; R |]),
-					  Concat (b, [| G; R |])),
-				  c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| R; G |]),
+					  Concat (b, [| R; G |])),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| G; R |]),
-					  Concat (b, [| G; R |])),
-				  c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| R; G |]),
+					  Concat (b, [| R; G |])),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| B; G; R |]),
-					  Concat (b, [| B; G; R |])),
-				  c, Int 0l))) ->
+  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| R; G; B |]),
+					  Concat (b, [| R; G; B |])),
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| B; G; R |]),
-					  Concat (b, [| B; G; R |])),
+  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| R; G; B |]),
+					  Concat (b, [| R; G; B |])),
 				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -381,7 +413,7 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 					   | Concat (a, [| A |])),
 					  (Select (b, [| A |])
 					   | Concat (b, [| A |]))),
-				  c, Int 0l))) ->
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
@@ -392,7 +424,7 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 					   | Concat (a, [| A |])),
 					  (Select (b, [| A |])
 					   | Concat (b, [| A |]))),
-				  c, Int 0l))) ->
+				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
@@ -613,13 +645,13 @@ let string_of_var_param = function
   | Rasa -> "rasa"
   | Extracted_const -> "extracted_const"
 
-let string_of_laneselect lsa =
+let string_of_laneselect lsa ~reverse =
   Array.fold_left
     (fun acc lane -> match lane with
-       R -> acc ^ "r"
-     | G -> acc ^ "g"
-     | B -> acc ^ "b"
-     | A -> acc ^ "a")
+       R -> if reverse then "r" ^ acc else acc ^ "r"
+     | G -> if reverse then "g" ^ acc else acc ^ "g"
+     | B -> if reverse then "b" ^ acc else acc ^ "b"
+     | A -> if reverse then "a" ^ acc else acc ^ "a")
     ""
     lsa
 
@@ -653,7 +685,7 @@ let string_of_expression expr =
   | Assign (dv, lsa, e) ->
       Buffer.add_string b (string_of_destvar dv);
       Buffer.add_char b '.';
-      Buffer.add_string b (string_of_laneselect lsa);
+      Buffer.add_string b (string_of_laneselect lsa ~reverse:false);
       Buffer.add_string b "=";
       scan e
   | Ceq (a, b) -> add_binop a " == " b
@@ -662,11 +694,11 @@ let string_of_expression expr =
   | Select (e, lsa) ->
       scan e;
       Buffer.add_char b '.';
-      Buffer.add_string b (string_of_laneselect lsa)
+      Buffer.add_string b (string_of_laneselect lsa ~reverse:false)
   | Concat (e, lsa) ->
       scan e;
       Buffer.add_char b '{';
-      Buffer.add_string b (string_of_laneselect lsa);
+      Buffer.add_string b (string_of_laneselect lsa ~reverse:true);
       Buffer.add_char b '}'
   | Ternary (x, y, z) ->
       scan x;
@@ -714,7 +746,7 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
   let expr, const_extr = rewrite_const expr ~alpha in
   let expr, texmap_texcoord = rewrite_texmaps expr ~alpha in
   let expr, colchan = rewrite_colchans expr ~alpha in
-  let expr, texswap, rasswap = rewrite_swap_tables expr in
+  let expr, texswap, rasswap = rewrite_swap_tables expr ~alpha in
   let comm_variants = commutative_variants expr in
   let matched = List.fold_right
     (fun variant found ->
