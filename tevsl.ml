@@ -1144,8 +1144,8 @@ let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
     let tnum' = if tnum == -1 then 0 else tnum
     and rnum' = if rnum == -1 then 0 else rnum in
     Printf.printf "GX_SetTevSwapMode (%s, %s, %s);\n"
-      (string_of_stagenum stagenum) (string_of_swap_table tnum')
-      (string_of_swap_table rnum')
+      (string_of_stagenum stagenum) (string_of_swap_table rnum')
+      (string_of_swap_table tnum')
   end
 
 let _ =
