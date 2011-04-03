@@ -18,7 +18,8 @@ type expr =
   | Ternary of expr * expr * expr
   | Texmap of int * int
 
-and lane_select = R | G | B | A
+(* X for "don't care".  *)
+and lane_select = R | G | B | A | X
 
 and var_param =
     Cprev
@@ -161,6 +162,8 @@ and tev_cmp_op =
   | CMP_bgr24_eq
   | CMP_rgb8_gt
   | CMP_rgb8_eq
+  | CMP_a8_gt  (* For alpha channel, same encoding as rgb8.  *)
+  | CMP_a8_eq
 
 and bias_values =
     TB_zero

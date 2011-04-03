@@ -79,6 +79,9 @@ let rewrite_const expr ~alpha =
     Plus (a, b) -> Plus (scan a, scan b)
   | Minus (a, b) -> Minus (scan a, scan b)
   | Divide (a, b) -> Divide (scan a, scan b)
+  | Mult (Minus (Int 1l, a), b) ->
+      (* Avoid rewriting the "1" in (1-x)*y -- hack!  *)
+      Mult (Minus (Int 1l, scan a), scan b)
   | Mult (a, b) -> Mult (scan a, scan b)
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
@@ -88,8 +91,7 @@ let rewrite_const expr ~alpha =
   | Cgt (a, b) -> Cgt (scan a, scan b)
   | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Float 1.0
-  | Int 1l when alpha -> set_const KCSEL_1
+  | Float 1.0 | Int 1l when alpha -> set_const KCSEL_1
   | Float 0.875 -> set_const KCSEL_7_8
   | Float 0.75 -> set_const KCSEL_3_4
   | Float 0.625 -> set_const KCSEL_5_8
@@ -131,57 +133,26 @@ exception Incompatible_swaps
 let rewrite_swap_tables expr ~alpha =
   let texswap = ref None
   and rasswap = ref None in
-  let set_cat_tex t =
-    match !texswap with
-      None ->
-        begin match t with
-	  [| R |]
-	| [| G; R |]
-	| [| B; G; R |]
-	| [| A |] -> ()
-	| _ -> texswap := Some t
-	end
-    | Some o -> if o <> t then raise Incompatible_swaps in
   let set_tex t =
     match !texswap with
-      None ->
-        begin match t with
-	| [| R; G; B |] when not alpha -> ()
-	| [| A |] when alpha -> ()
-	| _ -> texswap := Some t
-	end
+      None -> texswap := Some t
     | Some o -> if o <> t then raise Incompatible_swaps in
-  let set_cat_ras r =
-    match !rasswap with
-      None ->
-        begin match r with
-	  [| R |]
-	| [| G; R |]
-	| [| B; G; R |]
-	| [| A |] -> ()
-	| _ -> rasswap := Some r
-	end
-    | Some o -> if o <> r then raise Incompatible_swaps in
   let set_ras r =
     match !rasswap with
-      None ->
-        begin match r with
-	| [| R; G; B |] when not alpha -> ()
-	| [| A |] when alpha -> ()
-	| _ -> rasswap := Some r
-	end
+      None -> rasswap := Some r
     | Some o -> if o <> r then raise Incompatible_swaps in
-  let default_cat_swap = function
-    [| (R | G | B) |] -> [| R |]
-  | [| _; _ |] -> [| R; G |]
-  | [| _; _; _ |] -> [| R; G; B |]
-  | [| A |] -> [| A |]
+  let default_cat_swap var = function
+    [| R | G | B |] -> Concat (Var_ref var, [| R |])
+  | [| _; _ |] -> Concat (Var_ref var, [| R; G |])
+  | [| _; _; _ |] -> Concat (Var_ref var, [| R; G; B |])
+  | [| A |] -> if alpha then Var_ref var else Concat (Var_ref var, [| R |])
   | _ -> failwith "No default swap" in
-  let default_swap = function
-    [| (R | G | B) |] -> [| R |]
-  | [| _; _ |] -> [| R; G |]
-  | [| _; _; _ |] -> [| R; G; B |]
-  | [| A |] -> [| A |]
+  let default_swap var = function
+    [| R | G | B |] -> if alpha then Var_ref var
+		       else Select (Var_ref var, [| R |])
+  | [| _; _; _ |] -> Var_ref var
+  | [| _; _; _; _ |] -> Var_ref var
+  | [| A |] -> if alpha then Var_ref var else Select (Var_ref var, [| R |])
   | _ -> failwith "No default swap" in
   let rec scan = function
     Plus (a, b) -> Plus (scan a, scan b)
@@ -196,26 +167,22 @@ let rewrite_swap_tables expr ~alpha =
   | Cgt (a, b) -> Cgt (scan a, scan b)
   | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Var_ref x -> Var_ref x
   | Texmap (m, c) -> Texmap (m, c)
   | Float x -> Float x
   | Int x -> Int x
-  | Concat (Var_ref Texc, lx) ->
-      set_cat_tex lx; Concat (Var_ref Texc, default_cat_swap lx)
-  | Concat (Var_ref Texa, lx) ->
-      set_cat_tex lx; Concat (Var_ref Texa, default_cat_swap lx)
-  | Concat (Var_ref Rasc, lx) ->
-      set_cat_ras lx; Concat (Var_ref Rasc, default_cat_swap lx)
-  | Concat (Var_ref Rasa, lx) ->
-      set_cat_ras lx; Concat (Var_ref Rasa, default_cat_swap lx)
-  | Select (Var_ref Texc, lx) ->
-      set_tex lx; Select (Var_ref Texc, default_swap lx)
-  | Select (Var_ref Texa, lx) ->
-      set_tex lx; Select (Var_ref Texa, default_swap lx)
-  | Select (Var_ref Rasc, lx) ->
-      set_ras lx; Select (Var_ref Rasc, default_swap lx)
-  | Select (Var_ref Rasa, lx) ->
-      set_ras lx; Select (Var_ref Rasa, default_swap lx)
+  | Concat (Var_ref Texc, lx) -> set_tex lx; default_cat_swap Texc lx
+  | Concat (Var_ref Texa, lx) -> set_tex lx; default_cat_swap Texa lx
+  | Concat (Var_ref Rasc, lx) -> set_ras lx; default_cat_swap Rasc lx
+  | Concat (Var_ref Rasa, lx) -> set_ras lx; default_cat_swap Rasa lx
+  | Select (Var_ref Texc, lx) -> set_tex lx; default_swap Texc lx
+  | Select (Var_ref Texa, lx) -> set_tex lx; default_swap Texa lx
+  | Select (Var_ref Rasc, lx) -> set_ras lx; default_swap Rasc lx
+  | Select (Var_ref Rasa, lx) -> set_ras lx; default_swap Rasa lx
+  | Var_ref Texc -> set_tex [| R; G; B; X |]; Var_ref Texc
+  | Var_ref Texa -> set_tex [| X; X; X; A |]; Var_ref Texa
+  | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
+  | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
+  | Var_ref x -> Var_ref x
   | Select (x, lx) -> Select (scan x, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
@@ -301,7 +268,7 @@ let rewrite_colchans expr ~alpha =
 
 exception Unmatched_expr
 
-let rec arith_op_of_expr expr ac_var_of_expr =
+let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
   match expr with
     Assign (dv, _, Mult (Plus
 		       (Plus
@@ -333,24 +300,28 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	      scale = scale_of_expr tevscale;
 	      clamp = false;
 	      result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (a, [| R |])
-					   | Concat (a, [| R |])),
-					  (Select (b, [| R |])
-					   | Concat (b, [| R |]))),
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (Var_ref a, [| R |])
+					   | Concat (Var_ref a, [| R |])
+					   | Var_ref (Extracted_const as a)),
+					  (Select (Var_ref b, [| R |])
+					   | Concat (Var_ref b, [| R |])
+					   | Var_ref (Extracted_const as b))),
 				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr a;
-	     cmp_b = ac_var_of_expr b;
+      Comp { cmp_a = ac_var_of_expr (Var_ref a);
+	     cmp_b = ac_var_of_expr (Var_ref b);
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (a, [| R |])
-					   | Concat (a, [| R |])),
-					  (Select (b, [| R |])
-					   | Concat (b, [| R |]))),
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (Var_ref a, [| R |])
+					   | Concat (Var_ref a, [| R |])
+					   | Var_ref (Extracted_const as a)),
+					  (Select (Var_ref b, [| R |])
+					   | Concat (Var_ref b, [| R |])
+					   | Var_ref (Extracted_const as b))),
 				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr a;
-	     cmp_b = ac_var_of_expr b;
+      Comp { cmp_a = ac_var_of_expr (Var_ref a);
+	     cmp_b = ac_var_of_expr (Var_ref b);
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_eq;
@@ -391,48 +362,59 @@ let rec arith_op_of_expr expr ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Select (a, [| R; G; B |]),
-					  Select (b, [| R; G; B |])),
-				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr a;
-	     cmp_b = ac_var_of_expr b;
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (Var_ref a, [| R; G; B |])
+					   | Var_ref a),
+					  (Select (Var_ref b, [| R; G; B |])
+					   | Var_ref b)),
+				     c, Int 0l))) when not alpha ->
+      Comp { cmp_a = ac_var_of_expr (Var_ref a);
+	     cmp_b = ac_var_of_expr (Var_ref b);
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Select (a, [| R; G; B |]),
-					  Select (b, [| R; G; B |])),
-				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr a;
-	     cmp_b = ac_var_of_expr b;
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (Var_ref a, [| R; G; B |])
+					   | Var_ref a),
+					  (Select (Var_ref b, [| R; G; B |])
+					   | Var_ref b)),
+				     c, Int 0l))) when not alpha ->
+      Comp { cmp_a = ac_var_of_expr (Var_ref a);
+	     cmp_b = ac_var_of_expr (Var_ref b);
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_rgb8_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (a, [| A |])
-					   | Concat (a, [| A |])),
-					  (Select (b, [| A |])
-					   | Concat (b, [| A |]))),
-				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr a;
-	     cmp_b = ac_var_of_expr b;
+  | Assign (dv, _, Plus (d, Ternary
+			      (Cgt ((Select (Var_ref a, [| _; _; _; A |])
+				     | Concat (Var_ref a, [| _; _; _; A |])
+				     | Var_ref a),
+				    (Select (Var_ref b, [| _; _; _; A |])
+				     | Concat (Var_ref b, [| _; _; _; A |])
+				     | Var_ref b)),
+			       c, Int 0l))) ->
+      Comp { cmp_a = ac_var_of_expr (Var_ref a);
+	     cmp_b = ac_var_of_expr (Var_ref b);
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
-	     cmp_op = CMP_rgb8_gt;
+	     cmp_op = CMP_a8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (a, [| A |])
-					   | Concat (a, [| A |])),
-					  (Select (b, [| A |])
-					   | Concat (b, [| A |]))),
-				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr a;
-	     cmp_b = ac_var_of_expr b;
+  | Assign (dv, _, Plus (d, Ternary
+			      (Ceq ((Select (Var_ref a, [| _; _; _; A |])
+				     | Concat (Var_ref a, [| _; _; _; A |])
+				     | Var_ref a),
+				    (Select (Var_ref b, [| _; _; _; A |])
+				     | Concat (Var_ref b, [| _; _; _; A |])
+				     | Var_ref b)),
+			       c, Int 0l))) ->
+      Comp { cmp_a = ac_var_of_expr (Var_ref a);
+	     cmp_b = ac_var_of_expr (Var_ref b);
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
-	     cmp_op = CMP_rgb8_eq;
+	     cmp_op = CMP_a8_eq;
 	     cmp_result = dv }
   | Assign (dv, cs, Clamp expr) ->
-      let inner = arith_op_of_expr (Assign (dv, cs, expr)) ac_var_of_expr in
+      let inner =
+        arith_op_of_expr (Assign (dv, cs, expr)) ~alpha ac_var_of_expr in
       begin match inner with
         Arith foo -> Arith { foo with clamp = true }
       | _ -> raise Unmatched_expr
@@ -651,7 +633,8 @@ let string_of_laneselect lsa ~reverse =
        R -> if reverse then "r" ^ acc else acc ^ "r"
      | G -> if reverse then "g" ^ acc else acc ^ "g"
      | B -> if reverse then "b" ^ acc else acc ^ "b"
-     | A -> if reverse then "a" ^ acc else acc ^ "a")
+     | A -> if reverse then "a" ^ acc else acc ^ "a"
+     | X -> if reverse then "?" ^ acc else acc ^ "?")
     ""
     lsa
 
@@ -722,7 +705,9 @@ type 'ac stage_info = {
 
 type stage_col_alpha_parts = {
   mutable colour_part : cvar_setting stage_info option;
-  mutable alpha_part : avar_setting stage_info option
+  mutable alpha_part : avar_setting stage_info option;
+  mutable merged_tex_swaps : lane_select array option;
+  mutable merged_ras_swaps : lane_select array option
 }
 
 let parse_channel c =
@@ -758,7 +743,8 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
 	      Assign (dv, cs, expr) ->
 	        let expr' = rewrite_expr expr in
                 Some (stage,
-		      arith_op_of_expr (Assign (dv, cs, expr')) ac_var_of_expr)
+		      arith_op_of_expr (Assign (dv, cs, expr')) ~alpha
+				       ac_var_of_expr)
 	    | _ -> raise Unmatched_expr
 	  with Unmatched_expr ->
 	    None)
@@ -806,7 +792,10 @@ let combine_tev_orders col_order alpha_order =
 
 let array_of_stages stage_defs ns =
   let arr =
-    Array.init ns (fun _ -> { colour_part = None; alpha_part = None }) in
+    Array.init ns
+      (fun _ ->
+        { colour_part = None; alpha_part = None; merged_tex_swaps = None;
+	  merged_ras_swaps = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
       try
@@ -837,6 +826,108 @@ let array_of_stages stage_defs ns =
 	raise exc)
     stage_defs;
   arr
+
+let print_swaps snum t_or_r lsa =
+  Printf.printf "stage %d: %s swaps: %s\n" snum t_or_r
+		(string_of_laneselect lsa ~reverse:false)
+
+let set_swap_don't_cares sel ~alpha =
+  match sel with
+    [| a |] -> if alpha then [| X; X; X; a |] else [| a; X; X; X |]
+  | [| a; b |] -> [| a; b; X; X |]
+  | [| a; b; c |] -> [| a; b; c; X |]
+  | [| a; b; c; d |] -> [| a; b; c; d |]
+  | _ -> failwith "Unexpected swizzles"
+
+exception Swizzle_collision
+
+let merge_swaps a b =
+  let a' = set_swap_don't_cares a ~alpha:false
+  and b' = set_swap_don't_cares b ~alpha:true in
+  Array.init 4
+    (fun i ->
+      match a'.(i), b'.(i) with
+        (R | G | B | A as c), X -> c
+      | X, (R | G | B | A as c) -> c
+      | X, X -> X
+      | a, b when a = b -> a
+      | _, _ -> raise Swizzle_collision)
+
+let swap_matches a b =
+  let min_length = min (Array.length a) (Array.length b) in
+  let matching = ref true in
+  for i = 0 to min_length - 1 do
+    match a.(i), b.(i) with
+      (R | G | B | A), X
+    | X, (R | G | B | A)
+    | X, X -> ()
+    | a, b when a = b -> ()
+    | _ -> matching := false
+  done;
+  !matching
+
+let unique_swaps swaps unique_list =
+  if swaps = [| X; X; X; X |]
+     || List.exists (swap_matches swaps) unique_list then
+    unique_list
+  else
+    swaps :: unique_list
+
+let gather_swap_tables stage_def_arr =
+  let swap_tables = ref [] in
+  for i = 0 to Array.length stage_def_arr - 1 do
+    let cpart = stage_def_arr.(i).colour_part
+    and apart = stage_def_arr.(i).alpha_part in
+    let texswaps, rasswaps =
+      match cpart, apart with
+	Some cpart, Some apart ->
+          let texswaps =
+	    match cpart.tex_swaps, apart.tex_swaps with
+	      Some c_texswaps, Some a_texswaps ->
+		merge_swaps c_texswaps a_texswaps
+	    | Some c_texswaps, None ->
+	        set_swap_don't_cares c_texswaps ~alpha:false
+	    | None, Some a_texswaps ->
+	        set_swap_don't_cares a_texswaps ~alpha:true
+	    | None, None -> [| X; X; X; X |]
+	  and rasswaps =
+	    match cpart.ras_swaps, apart.ras_swaps with
+	      Some c_rasswaps, Some a_rasswaps ->
+		merge_swaps c_rasswaps a_rasswaps
+	    | Some c_rasswaps, None ->
+	        set_swap_don't_cares c_rasswaps ~alpha:false
+	    | None, Some a_rasswaps ->
+	        set_swap_don't_cares a_rasswaps ~alpha:true
+	    | None, None -> [| X; X; X; X |] in
+	  texswaps, rasswaps
+      | Some cpart, None ->
+          let texswaps =
+	    match cpart.tex_swaps with
+	      Some c_texswaps -> set_swap_don't_cares c_texswaps ~alpha:false
+	    | None -> [| X; X; X; X |]
+          and rasswaps =
+	    match cpart.ras_swaps with
+	      Some c_rasswaps -> set_swap_don't_cares c_rasswaps ~alpha:false
+	    | None -> [| X; X; X; X |] in
+	  texswaps, rasswaps
+      | None, Some apart ->
+          let texswaps =
+	    match apart.tex_swaps with
+	      Some a_texswaps -> set_swap_don't_cares a_texswaps ~alpha:true
+	    | None -> [| X; X; X; X |]
+          and rasswaps =
+	    match apart.ras_swaps with
+	      Some a_rasswaps -> set_swap_don't_cares a_rasswaps ~alpha:true
+	    | None -> [| X; X; X; X |] in
+	  texswaps, rasswaps
+       | None, None ->
+           [| X; X; X; X |], [| X; X; X; X |] in
+    swap_tables := unique_swaps texswaps !swap_tables;
+    swap_tables := unique_swaps rasswaps !swap_tables;
+    stage_def_arr.(i).merged_tex_swaps <- Some texswaps;
+    stage_def_arr.(i).merged_ras_swaps <- Some rasswaps
+  done;
+  Array.of_list !swap_tables
 
 let string_of_stagenum n =
   "GX_TEVSTAGE" ^ (string_of_int n)
@@ -903,6 +994,8 @@ let string_of_cmp_op = function
   | CMP_bgr24_eq -> "GX_TEV_COMP_BGR24_EQ"
   | CMP_rgb8_gt -> "GX_TEV_COMP_RGB8_GT"
   | CMP_rgb8_eq -> "GX_TEV_COMP_RGB8_EQ"
+  | CMP_a8_gt -> "GX_TEV_COMP_A8_GT"
+  | CMP_a8_eq -> "GX_TEV_COMP_A8_EQ"
 
 let string_of_colour_chan = function
     Colour0 -> "GX_COLOR0"
@@ -997,12 +1090,73 @@ let print_tev_setup stage_num stage_op string_of_ac_input ~alpha =
         (string_of_stagenum stage_num) (string_of_cmp_op cmp.cmp_op)
 	(string_of_result cmp.cmp_result)
 
+let string_of_chan = function
+    R | X -> "GX_CH_RED"
+  | G -> "GX_CH_GREEN"
+  | B -> "GX_CH_BLUE"
+  | A -> "GX_CH_ALPHA"
+
+let string_of_swap_table n =
+  "GX_TEV_SWAP" ^ (string_of_int n)
+
+exception Too_many_swap_tables
+
+let print_swap_tables swap_tables =
+  if Array.length swap_tables > 4 then
+    raise Too_many_swap_tables;
+  Array.iteri
+    (fun i tab ->
+      Printf.printf "GX_SetSwapModeTable (%s, %s, %s, %s, %s);\n"
+        (string_of_swap_table i) (string_of_chan tab.(0))
+	(string_of_chan tab.(1)) (string_of_chan tab.(2))
+	(string_of_chan tab.(3)))
+    swap_tables
+
+exception Swap_table_missing
+
+let matching_swap_table_entry swap_tables table =
+  if table = [| X; X; X; X |] then
+    -1
+  else begin
+    let found = ref None in
+    for i = 0 to Array.length swap_tables - 1 do
+      if swap_matches swap_tables.(i) table then
+	found := Some i
+    done;
+    match !found with
+      None -> raise Swap_table_missing
+    | Some f -> f
+  end
+
+let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
+  let tnum, rnum =
+    match tex_swaps, ras_swaps with
+      Some ts, Some rs ->
+        matching_swap_table_entry swap_tables ts,
+	matching_swap_table_entry swap_tables rs
+    | Some ts, None ->
+        matching_swap_table_entry swap_tables ts, -1
+    | None, Some rs ->
+        -1, matching_swap_table_entry swap_tables rs
+    | None, None ->
+        -1, -1 in
+  if tnum != -1 || rnum != -1 then begin
+    let tnum' = if tnum == -1 then 0 else tnum
+    and rnum' = if rnum == -1 then 0 else rnum in
+    Printf.printf "GX_SetTevSwapMode (%s, %s, %s);\n"
+      (string_of_stagenum stagenum) (string_of_swap_table tnum')
+      (string_of_swap_table rnum')
+  end
+
 let _ =
   let parsed_stages = parse_channel stdin in
   let num_stages = num_stages parsed_stages in
   print_num_stages num_stages;
   print_newline ();
   let stage_arr = array_of_stages parsed_stages num_stages in
+  let swap_tables = gather_swap_tables stage_arr in
+  print_swap_tables swap_tables;
+  print_newline ();
   for i = 0 to num_stages - 1 do
     let texmap, colchan =
       match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
@@ -1010,6 +1164,8 @@ let _ =
       | Some cp, None -> cp.texmap, cp.colchan
       | Some cp, Some ap -> combine_tev_orders cp ap
       | None, None -> failwith "Missing tev stage!" in
+    print_swap_setup i swap_tables stage_arr.(i).merged_tex_swaps
+		     stage_arr.(i).merged_ras_swaps;
     print_tev_order i texmap colchan;
     begin match stage_arr.(i).colour_part with
       Some cpart ->
