@@ -93,11 +93,21 @@ rule token = parse
 		    { TEXMAP (int_of_string n) }
   | "texcoord" (intnum as n)
 		    { TEXCOORD (int_of_string n) }
+  | "indmtx" (intnum as n)
+  		    { INDMTX (Expr.Ind_matrix (int_of_string n)) }
+  | "s_dynmtx"	    { INDMTX Expr.Dyn_S }
+  | "t_dynmtx"	    { INDMTX Expr.Dyn_T }
+  | "indscale" (intnum as n)
+		    { INDSCALE (int_of_string n) }
   | "stage"	    { STAGE }
   | "+"		    { PLUS }
   | "-"		    { MINUS }
+  | "@+"	    { ACCUM }
+  | "@-"	    { DEACCUM }
+  | "**"	    { MATMUL }
   | "*"		    { MULT }
   | "/"		    { DIVIDE }
+  | "%"		    { MODULUS }
   | ">"		    { GT }
   | "<"		    { LT }
   | ">="	    { GTE }

@@ -4,18 +4,20 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
-%token LBRACE RBRACE DOT
+%token LBRACE RBRACE DOT ACCUM DEACCUM MATMUL MODULUS
 %token <int32> INT
 %token <float> FLOAT
-%token <int> TEXMAP TEXCOORD
+%token <int> TEXMAP TEXCOORD INDSCALE
+%token <Expr.ind_matrix> INDMTX
 %token <Expr.var_param> VAR
 %token <Expr.dest_var> DESTVAR
 %token <Expr.lane_select array> CHANSELECT
 
 %left QUESTIONMARK COLON
 %left EQ LT GT
-%left PLUS MINUS
-%left MULT DIVIDE
+%left PLUS MINUS ACCUM DEACCUM
+%left MULT DIVIDE MODULUS
+%right MATMUL
 
 %start <(int * Expr.expr list) list> stage_defs
 
@@ -44,15 +46,26 @@ stage_expr: n = INT			{ Expr.Int n }
 					{ Expr.Plus (a, b) }
 	  | a = stage_expr MINUS b = stage_expr
 					{ Expr.Minus (a, b) }
+	  | a = stage_expr ACCUM b = stage_expr
+					{ Expr.Accum (a, b) }
+	  | a = stage_expr DEACCUM b = stage_expr
+					{ Expr.Deaccum (a, b) }
 	  | a = stage_expr MULT b = stage_expr
 					{ Expr.Mult (a, b) }
+	  | a = stage_expr MATMUL b = stage_expr
+					{ Expr.Matmul (a, b) }
 	  | a = stage_expr DIVIDE b = stage_expr
 					{ Expr.Divide (a, b) }
+	  | a = stage_expr MODULUS b = stage_expr
+					{ Expr.Modulus (a, b) }
 	  | LPAREN e = stage_expr RPAREN
 	  				{ e }
 	  | v = VAR 			{ Expr.Var_ref v }
-	  | m = TEXMAP LSQUARE c = TEXCOORD RSQUARE
-					{ Expr.Texmap (m, c) }
+	  | m = TEXMAP LSQUARE e = stage_expr RSQUARE
+					{ Expr.Texmap (m, e) }
+          | t = TEXCOORD		{ Expr.Texcoord t }
+	  | s = INDSCALE		{ Expr.Indscale s }
+	  | m = INDMTX			{ Expr.Indmtx m }
 	  | MINUS e = stage_expr	{ Expr.Neg e }
 	  | a = DESTVAR DOT c = CHANSELECT ASSIGN b = stage_expr
 					{ Expr.Assign (a, c, b) }

@@ -83,6 +83,10 @@ let rewrite_const expr ~alpha =
       (* Avoid rewriting the "1" in (1-x)*y -- hack!  *)
       Mult (Minus (Int 1l, scan a), scan b)
   | Mult (a, b) -> Mult (scan a, scan b)
+  | Modulus (a, b) -> Modulus (scan a, scan b)
+  | Matmul (a, b) -> Matmul (scan a, scan b)
+  | Accum (a, b) -> Accum (scan a, scan b)
+  | Deaccum (a, b) -> Deaccum (scan a, scan b)
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
@@ -120,10 +124,8 @@ let rewrite_const expr ~alpha =
   | Select (Var_ref K2, [| A |]) -> set_const KCSEL_K2_A
   | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
   | Concat (e, ls) -> Concat (scan e, ls)
-  | Float x -> Float x
-  | Int x -> Int x
-  | Var_ref x -> Var_ref x
-  | Texmap (m, c) -> Texmap (m, c)
+  | (Float _ | Int _ | Var_ref _ | Texmap _ | Indmtx _ | Indscale _
+     | Texcoord _ as i) -> i
   | Select (a, la) -> Select (scan a, la) in
   let expr' = scan expr in
   expr', !which_const
@@ -159,6 +161,10 @@ let rewrite_swap_tables expr ~alpha =
   | Minus (a, b) -> Minus (scan a, scan b)
   | Divide (a, b) -> Divide (scan a, scan b)
   | Mult (a, b) -> Mult (scan a, scan b)
+  | Matmul (a, b) -> Matmul (scan a, scan b)
+  | Modulus (a, b) -> Modulus (scan a, scan b)
+  | Accum (a, b) -> Accum (scan a, scan b)
+  | Deaccum (a, b) -> Deaccum (scan a, scan b)
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
@@ -183,15 +189,69 @@ let rewrite_swap_tables expr ~alpha =
   | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
   | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
   | Var_ref x -> Var_ref x
+  | (Indmtx _ | Indscale _ | Texcoord _ as i) -> i
   | Select (x, lx) -> Select (scan x, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
   expr', !texswap, !rasswap
 
+type texcoord = S | T | U
+
+type indirect_info = {
+  (* Settings in GX_SetTevIndirect.  *)
+  ind_tex_id : int option;
+  ind_tex_format : int;
+  ind_tex_bias : texcoord array;
+  ind_tex_matrix : ind_matrix;
+  ind_tex_wrap_s : int32 option;
+  ind_tex_wrap_t : int32 option;
+  ind_tex_addprev : bool;
+  ind_tex_modified_lod : bool;
+  ind_tex_alpha_select : texcoord option;
+  
+  (* Other settings.  *)
+  ind_tex_coordscale : (int * int) option;
+}
+
+exception Unrecognized_indirect_texcoord_part of string * expr
+
+let match_tc_maybe_modulus = function
+    Texcoord tc -> tc, None
+  | Modulus (Texcoord tc, Int m) -> tc, Some m
+  | x -> raise (Unrecognized_indirect_texcoord_part ("texcoord", x))
+
+let match_tm_maybe_bias = function
+    Texmap (tm, Texcoord tc) -> tm, tc, None
+  | Plus (Texmap (tm, Texcoord tc), (Int _ | Float _ as b)) -> tm, tc, Some b
+  | x -> raise (Unrecognized_indirect_texcoord_part ("texmap", x))
+
+let rewrite_indirect_texcoord = function
+    Plus (tc_modulus_or_not, Mult (Matmul (Indmtx im, tm_bias_or_not),
+				   Indscale is)) ->
+      let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not
+      and texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      let ind_info =
+        {
+	  ind_tex_id = None;
+	  ind_tex_format = 8;
+	  ind_tex_bias = [| |];
+	  ind_tex_matrix = im;
+	  ind_tex_wrap_s = modu;
+	  ind_tex_wrap_t = modu;
+	  ind_tex_addprev = false;
+	  ind_tex_modified_lod = true;
+	  ind_tex_alpha_select = None;
+	  ind_tex_coordscale = None
+        } in
+      Texmap (texmap, Texcoord texcoord), ind_info
+  | x -> raise (Unrecognized_indirect_texcoord_part ("indirect", x))
+
 exception Incompatible_texmaps
+exception Non_simple_texcoord
 
 let rewrite_texmaps expr ~alpha =
-  let texmap_texcoord = ref None in
+  let texmap_texcoord = ref None
+  and indirect_stuff = ref None in
   let set_texmap m c =
     match !texmap_texcoord with
       None -> texmap_texcoord := Some (m, c)
@@ -203,6 +263,10 @@ let rewrite_texmaps expr ~alpha =
   | Minus (a, b) -> Minus (scan a, scan b)
   | Divide (a, b) -> Divide (scan a, scan b)
   | Mult (a, b) -> Mult (scan a, scan b)
+  | Matmul (a, b) -> Matmul (scan a, scan b)
+  | Modulus (a, b) -> Modulus (scan a, scan b)
+  | Accum (a, b) -> Accum (scan a, scan b)
+  | Deaccum (a, b) -> Deaccum (scan a, scan b)
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
@@ -212,14 +276,17 @@ let rewrite_texmaps expr ~alpha =
   | Clt (a, b) -> Clt (scan a, scan b)
   | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
   | Var_ref x -> Var_ref x
-  | Texmap (m, c) ->
+  | Texmap (m, Texcoord c) ->
       set_texmap m c; if alpha then Var_ref Texa else Var_ref Texc
-  | Float x -> Float x
-  | Int x -> Int x
+  | Texmap (m, itc) ->
+      let plain_texcoord, istuff = rewrite_indirect_texcoord itc in
+      indirect_stuff := Some istuff;
+      scan plain_texcoord
+  | (Float _ | Int _ | Texcoord _ | Indmtx _ | Indscale _ as i) -> i
   | Select (v, lx) -> Select (scan v, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
-  expr', !texmap_texcoord
+  expr', !texmap_texcoord, !indirect_stuff
 
 exception Incompatible_colour_channels
 
@@ -236,6 +303,10 @@ let rewrite_colchans expr ~alpha =
   | Minus (a, b) -> Minus (scan a, scan b)
   | Divide (a, b) -> Divide (scan a, scan b)
   | Mult (a, b) -> Mult (scan a, scan b)
+  | Matmul (a, b) -> Matmul (scan a, scan b)
+  | Modulus (a, b) -> Modulus (scan a, scan b)
+  | Accum (a, b) -> Accum (scan a, scan b)
+  | Deaccum (a, b) -> Deaccum (scan a, scan b)
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
@@ -257,10 +328,8 @@ let rewrite_colchans expr ~alpha =
   | Var_ref AlphaBump -> set_colchan AlphaBump; Var_ref Rasa
   | Var_ref AlphaBumpN ->
       set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
-  | Var_ref x -> Var_ref x
-  | Texmap (m, c) -> Texmap (m, c)
-  | Float x -> Float x
-  | Int x -> Int x
+  | (Var_ref _ | Texmap _ | Float _ | Int _ | Indmtx _ | Indscale _
+     | Texcoord _ as i) -> i
   | Select (v, lx) -> Select (scan v, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
@@ -529,6 +598,10 @@ let rec rewrite_rationals = function
   | Divide (a, (Int 2l | Float 2.0)) -> Mult (rewrite_rationals a, Float 0.5)
   | Divide (a, b) -> Divide (rewrite_rationals a, rewrite_rationals b)
   | Mult (a, b) -> Mult (rewrite_rationals a, rewrite_rationals b)
+  | Matmul (a, b) -> Matmul (rewrite_rationals a, rewrite_rationals b)
+  | Modulus (a, b) -> Modulus (rewrite_rationals a, rewrite_rationals b)
+  | Accum (a, b) -> Accum (rewrite_rationals a, rewrite_rationals b)
+  | Deaccum (a, b) -> Deaccum (rewrite_rationals a, rewrite_rationals b)
   | Neg a -> Neg (rewrite_rationals a)
   | Clamp a -> Clamp (rewrite_rationals a)
   | Mix (a, b, c) -> Mix (rewrite_rationals a, rewrite_rationals b,
@@ -543,10 +616,8 @@ let rec rewrite_rationals = function
   | Float 2.0 -> Int 2l
   | Float 1.0 -> Int 1l
   | Float 0.0 -> Int 0l
-  | Float x -> Float x
-  | Int x -> Int x
-  | Var_ref x -> Var_ref x
-  | Texmap (m, c) -> Texmap (m, c)
+  | (Float _ | Int _ | Var_ref _ | Texmap _ | Texcoord _ | Indmtx _
+     | Indscale _ as i) -> i
   | Select (x, lx) -> Select (rewrite_rationals x, lx)
   | Concat (x, lx) -> Concat (rewrite_rationals x, lx)
 
@@ -644,6 +715,11 @@ let string_of_destvar = function
   | Tevreg1 -> "tevreg1"
   | Tevreg2 -> "tevreg2"
 
+let string_of_indmtx = function
+    Ind_matrix i -> "indmtx" ^ string_of_int i
+  | Dyn_S -> "s_dynmtx"
+  | Dyn_T -> "t_dynmtx"
+
 let string_of_expression expr =
   let b = Buffer.create 20 in
   let rec add_binop x op y =
@@ -659,6 +735,10 @@ let string_of_expression expr =
   | Minus (a, b) -> add_binop a " - " b
   | Mult (a, b) -> add_binop a " * " b
   | Divide (a, b) -> add_binop a " / " b
+  | Matmul (a, b) -> add_binop a " ** " b
+  | Modulus (a, b) -> add_binop a " % " b
+  | Accum (a, b) -> add_binop a " @+ " b
+  | Deaccum (a, b) -> add_binop a " @- " b
   | Var_ref r -> Buffer.add_string b (string_of_var_param r)
   | Neg a -> Buffer.add_string b "-("; scan a; Buffer.add_char b ')'
   | Clamp a -> Buffer.add_string b "clamp("; scan a; Buffer.add_char b ')'
@@ -690,7 +770,12 @@ let string_of_expression expr =
       Buffer.add_string b " : ";
       scan z
   | Texmap (x, y) ->
-      Buffer.add_string b (Printf.sprintf "texmap%d[texcoord%d]" x y) in
+      Buffer.add_string b (Printf.sprintf "texmap%d[" x);
+      scan y;
+      Buffer.add_char b ']'
+  | Texcoord t -> Buffer.add_string b ("texcoord" ^ string_of_int t)
+  | Indmtx i -> Buffer.add_string b (string_of_indmtx i)
+  | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s) in
   scan expr;
   Buffer.contents b
 
@@ -698,6 +783,7 @@ type 'ac stage_info = {
   stage_operation : 'ac tev;
   const_usage : const_setting option;
   texmap : (int * int) option;
+  indirect : indirect_info option;
   colchan: var_param option;
   tex_swaps : lane_select array option;
   ras_swaps : lane_select array option
@@ -729,7 +815,7 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
   let expr = rewrite_rationals orig_expr in
   let expr = rewrite_mix expr in
   let expr, const_extr = rewrite_const expr ~alpha in
-  let expr, texmap_texcoord = rewrite_texmaps expr ~alpha in
+  let expr, texmap_texcoord, indtex = rewrite_texmaps expr ~alpha in
   let expr, colchan = rewrite_colchans expr ~alpha in
   let expr, texswap, rasswap = rewrite_swap_tables expr ~alpha in
   let comm_variants = commutative_variants expr in
@@ -756,6 +842,7 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
 	stage_operation = tevop;
 	const_usage = const_extr;
 	texmap = texmap_texcoord;
+	indirect = indtex;
 	colchan = colchan;
 	tex_swaps = texswap;
 	ras_swaps = rasswap
@@ -1148,6 +1235,12 @@ let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
       (string_of_swap_table tnum')
   end
 
+let print_indirect_setup stagenum ind_part =
+  match ind_part with
+    None -> Printf.printf "GX_SetTevDirect (%s);\n"
+	      (string_of_stagenum stagenum)
+  | Some ind -> ()
+
 let _ =
   let parsed_stages = parse_channel stdin in
   let num_stages = num_stages parsed_stages in
@@ -1158,15 +1251,17 @@ let _ =
   print_swap_tables swap_tables;
   print_newline ();
   for i = 0 to num_stages - 1 do
-    let texmap, colchan =
+    let texmap, colchan, indir_part =
       match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
-        None, Some ap -> ap.texmap, ap.colchan
-      | Some cp, None -> cp.texmap, cp.colchan
-      | Some cp, Some ap -> combine_tev_orders cp ap
+        None, Some ap -> ap.texmap, ap.colchan, ap.indirect
+      | Some cp, None -> cp.texmap, cp.colchan, cp.indirect
+      | Some cp, Some ap ->
+          let a, b = combine_tev_orders cp ap in a, b, cp.indirect
       | None, None -> failwith "Missing tev stage!" in
     print_swap_setup i swap_tables stage_arr.(i).merged_tex_swaps
 		     stage_arr.(i).merged_ras_swaps;
     print_tev_order i texmap colchan;
+    print_indirect_setup i indir_part;
     begin match stage_arr.(i).colour_part with
       Some cpart ->
         begin match cpart.const_usage with

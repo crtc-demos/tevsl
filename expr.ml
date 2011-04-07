@@ -2,9 +2,13 @@ type expr =
     Int of int32
   | Float of float
   | Plus of expr * expr
+  | Accum of expr * expr
+  | Deaccum of expr * expr
   | Minus of expr * expr
   | Mult of expr * expr
+  | Matmul of expr * expr
   | Divide of expr * expr
+  | Modulus of expr * expr
   | Var_ref of var_param
   | Neg of expr
   | Clamp of expr
@@ -16,7 +20,10 @@ type expr =
   | Select of expr * lane_select array
   | Concat of expr * lane_select array
   | Ternary of expr * expr * expr
-  | Texmap of int * int
+  | Texmap of int * expr
+  | Texcoord of int
+  | Indscale of int
+  | Indmtx of ind_matrix
 
 (* X for "don't care".  *)
 and lane_select = R | G | B | A | X
@@ -84,6 +91,11 @@ and const_setting =
   | KCSEL_K1_A
   | KCSEL_K2_A
   | KCSEL_K3_A
+
+and ind_matrix =
+    Ind_matrix of int
+  | Dyn_S
+  | Dyn_T
 
 (* 
     TevColorIn: a b c d
