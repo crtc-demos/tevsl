@@ -204,7 +204,6 @@ type indirect_info = {
   ind_texmap : int;
   ind_texcoord : int;
   (* Settings in GX_SetTevIndirect.  *)
-  ind_tex_id : int option;
   ind_tex_format : int;
   ind_tex_bias : float array;
   ind_tex_matrix : ind_matrix;
@@ -252,7 +251,6 @@ let rewrite_indirect_texcoord = function
         {
 	  ind_texmap = texmap;
 	  ind_texcoord = itexcoord;
-	  ind_tex_id = None;
 	  ind_tex_format = 8;
 	  ind_tex_bias = bias;
 	  ind_tex_matrix = im;
@@ -271,7 +269,6 @@ let rewrite_indirect_texcoord = function
         {
 	  ind_texmap = texmap;
 	  ind_texcoord = itexcoord;
-	  ind_tex_id = None;
 	  ind_tex_format = 8;
 	  ind_tex_bias = bias;
 	  ind_tex_matrix = im;
@@ -1074,6 +1071,53 @@ let gather_swap_tables stage_def_arr =
   done;
   Array.of_list !swap_tables
 
+let add_if_different l ls =
+  if List.mem l ls then
+    ls
+  else
+    l :: ls
+
+let gather_indirect_lookups stage_arr =
+  let ind_luts = ref [] in
+  for i = 0 to Array.length stage_arr - 1 do
+    match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
+      None, None -> ()
+    | Some cp, None ->
+        begin match cp.indirect with
+	  None -> ()
+	| Some ind ->
+	  ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+				       !ind_luts
+	end
+    | None, Some ap ->
+        begin match ap.indirect with
+	  None -> ()
+	| Some ind ->
+	  ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+				       !ind_luts
+	end
+    | Some part1, Some part2 ->
+        let ind_part = merge_indirect part1.indirect part2.indirect in
+        begin match ind_part with
+	  None -> ()
+	| Some ind ->
+	  ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+				       !ind_luts
+	end
+  done;
+  Array.of_list !ind_luts
+
+let lookup_indirect ind_lut_arr ind_part =
+  let found = ref None in
+  Array.iteri
+    (fun idx (tm, tc) ->
+      if ind_part.ind_texmap = tm && ind_part.ind_texcoord = tc then
+        found := Some idx)
+    ind_lut_arr;
+  match !found with
+    None -> failwith "Can't find indirect lookup"
+  | Some f -> f
+
 let string_of_stagenum n =
   "GX_TEVSTAGE" ^ (string_of_int n)
 
@@ -1189,9 +1233,8 @@ let string_of_const cst alpha =
   | _ -> failwith "Bad constant" in
   ac ^ tail
 
-let string_of_indtexidx = function
-    None -> "<NOT SET>"
-  | Some x -> "GX_INDTEXSTAGE" ^ string_of_int x
+let string_of_indtexidx x =
+  "GX_INDTEXSTAGE" ^ string_of_int x
 
 let string_of_format = function
     3 -> "GX_ITF_3"
@@ -1364,14 +1407,27 @@ let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
       (string_of_swap_table tnum')
   end
 
-let print_indirect_setup stagenum ind_part =
+let string_of_ind_tev_stage n =
+  "GX_INDTEVSTAGE" ^ (string_of_int n)
+
+let print_indirect_lookups lut_arr =
+  Printf.printf "GX_SetNumIndStages (%d);\n" (Array.length lut_arr);
+  for i = 0 to Array.length lut_arr - 1 do
+    let tm, tc = lut_arr.(i) in
+    Printf.printf
+      "GX_SetIndTexOrder (GX_INDTEVSTAGE%d, GX_TEXMAP%d, GX_TEXCOORD%d);\n"
+      i tm tc
+  done
+
+let print_indirect_setup stagenum ind_lookups ind_part =
   match ind_part with
     None -> Printf.printf "GX_SetTevDirect (%s);\n"
 	      (string_of_stagenum stagenum)
   | Some ind ->
       Printf.printf
         "GX_SetTevIndirect (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);\n"
-	(string_of_stagenum stagenum) (string_of_indtexidx ind.ind_tex_id)
+	(string_of_stagenum stagenum)
+	(string_of_indtexidx (lookup_indirect ind_lookups ind))
 	(string_of_format ind.ind_tex_format)
 	(string_of_indbias ind.ind_tex_format ind.ind_tex_bias)
 	(string_of_mtxidx ind.ind_tex_matrix ind.ind_tex_scale)
@@ -1387,7 +1443,10 @@ let _ =
   print_newline ();
   let stage_arr = array_of_stages parsed_stages num_stages in
   let swap_tables = gather_swap_tables stage_arr in
+  let indirect_lookups = gather_indirect_lookups stage_arr in
   print_swap_tables swap_tables;
+  print_newline ();
+  print_indirect_lookups indirect_lookups;
   print_newline ();
   for i = 0 to num_stages - 1 do
     let texmap, colchan, indir_part =
@@ -1401,7 +1460,7 @@ let _ =
     print_swap_setup i swap_tables stage_arr.(i).merged_tex_swaps
 		     stage_arr.(i).merged_ras_swaps;
     print_tev_order i texmap colchan;
-    print_indirect_setup i indir_part;
+    print_indirect_setup i indirect_lookups indir_part;
     begin match stage_arr.(i).colour_part with
       Some cpart ->
         begin match cpart.const_usage with
