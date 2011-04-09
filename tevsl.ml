@@ -90,6 +90,7 @@ let rewrite_const expr ~alpha =
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
+  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
   | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
   | Ceq (a, b) -> Ceq (scan a, scan b)
   | Cgt (a, b) -> Cgt (scan a, scan b)
@@ -168,6 +169,7 @@ let rewrite_swap_tables expr ~alpha =
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
+  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
   | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
   | Ceq (a, b) -> Ceq (scan a, scan b)
   | Cgt (a, b) -> Cgt (scan a, scan b)
@@ -198,11 +200,15 @@ let rewrite_swap_tables expr ~alpha =
 type texcoord = S | T | U
 
 type indirect_info = {
+  (* Settings in GX_SetIndTexOrder.  *)
+  ind_texmap : int;
+  ind_texcoord : int;
   (* Settings in GX_SetTevIndirect.  *)
   ind_tex_id : int option;
   ind_tex_format : int;
-  ind_tex_bias : texcoord array;
+  ind_tex_bias : float array;
   ind_tex_matrix : ind_matrix;
+  ind_tex_scale : int;
   ind_tex_wrap_s : int32 option;
   ind_tex_wrap_t : int32 option;
   ind_tex_addprev : bool;
@@ -220,9 +226,21 @@ let match_tc_maybe_modulus = function
   | Modulus (Texcoord tc, Int m) -> tc, Some m
   | x -> raise (Unrecognized_indirect_texcoord_part ("texcoord", x))
 
+let rec plain_float = function
+    Int x -> Int32.to_float x
+  | Float x -> x
+  | Neg x -> -.(plain_float x)
+  | x -> raise (Unrecognized_indirect_texcoord_part ("plain_float", x))
+
+let match_bias = function
+    Int x -> [| Int32.to_float x; Int32.to_float x; Int32.to_float x |]
+  | Float x -> [| x; x; x |]
+  | Vec3 (a, b, c) -> [| plain_float a; plain_float b; plain_float c |]
+  | x -> raise (Unrecognized_indirect_texcoord_part ("bias", x))
+
 let match_tm_maybe_bias = function
-    Texmap (tm, Texcoord tc) -> tm, tc, None
-  | Plus (Texmap (tm, Texcoord tc), (Int _ | Float _ as b)) -> tm, tc, Some b
+    Texmap (tm, Texcoord tc) -> tm, tc, [| 0.0; 0.0; 0.0 |]
+  | Plus (Texmap (tm, Texcoord tc), bias) -> tm, tc, match_bias bias
   | x -> raise (Unrecognized_indirect_texcoord_part ("texmap", x))
 
 let rewrite_indirect_texcoord = function
@@ -232,10 +250,13 @@ let rewrite_indirect_texcoord = function
       and texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
         {
+	  ind_texmap = texmap;
+	  ind_texcoord = itexcoord;
 	  ind_tex_id = None;
 	  ind_tex_format = 8;
-	  ind_tex_bias = [| |];
+	  ind_tex_bias = bias;
 	  ind_tex_matrix = im;
+	  ind_tex_scale = is;
 	  ind_tex_wrap_s = modu;
 	  ind_tex_wrap_t = modu;
 	  ind_tex_addprev = false;
@@ -244,7 +265,31 @@ let rewrite_indirect_texcoord = function
 	  ind_tex_coordscale = None
         } in
       Texmap (texmap, Texcoord texcoord), ind_info
+  | Mult (Matmul (Indmtx im, tm_bias_or_not), Indscale is) ->
+      let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      let ind_info =
+        {
+	  ind_texmap = texmap;
+	  ind_texcoord = itexcoord;
+	  ind_tex_id = None;
+	  ind_tex_format = 8;
+	  ind_tex_bias = bias;
+	  ind_tex_matrix = im;
+	  ind_tex_scale = is;
+	  (* Zero modulus -> zero for the regular texture coords.  *)
+	  ind_tex_wrap_s = Some 0l;
+	  ind_tex_wrap_t = Some 0l;
+	  ind_tex_addprev = false;
+	  ind_tex_modified_lod = true;
+	  ind_tex_alpha_select = None;
+	  ind_tex_coordscale = None
+        } in
+      (* Texcoord is zeroed out anyway: pick zero.  *)
+      Texmap (texmap, Texcoord 0), ind_info
   | x -> raise (Unrecognized_indirect_texcoord_part ("indirect", x))
+
+let merge_indirect a b =
+  if a = b then a else failwith "Can't merge indirect parts"
 
 exception Incompatible_texmaps
 exception Non_simple_texcoord
@@ -270,6 +315,7 @@ let rewrite_texmaps expr ~alpha =
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
+  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
   | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
   | Ceq (a, b) -> Ceq (scan a, scan b)
   | Cgt (a, b) -> Cgt (scan a, scan b)
@@ -310,6 +356,7 @@ let rewrite_colchans expr ~alpha =
   | Neg a -> Neg (scan a)
   | Clamp a -> Clamp (scan a)
   | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
+  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
   | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
   | Ceq (a, b) -> Ceq (scan a, scan b)
   | Cgt (a, b) -> Cgt (scan a, scan b)
@@ -606,6 +653,8 @@ let rec rewrite_rationals = function
   | Clamp a -> Clamp (rewrite_rationals a)
   | Mix (a, b, c) -> Mix (rewrite_rationals a, rewrite_rationals b,
 			  rewrite_rationals c)
+  | Vec3 (a, b, c) -> Vec3 (rewrite_rationals a, rewrite_rationals b,
+			    rewrite_rationals c)
   | Assign (dv, cs, e) -> Assign (dv, cs, rewrite_rationals e)
   | Ceq (a, b) -> Ceq (rewrite_rationals a, rewrite_rationals b)
   | Cgt (a, b) -> Cgt (rewrite_rationals a, rewrite_rationals b)
@@ -744,6 +793,9 @@ let string_of_expression expr =
   | Clamp a -> Buffer.add_string b "clamp("; scan a; Buffer.add_char b ')'
   | Mix (x, y, z) ->
       Buffer.add_string b "mix("; scan x; Buffer.add_char b ','; scan y;
+      Buffer.add_char b ','; scan z; Buffer.add_char b ')'
+  | Vec3 (x, y, z) ->
+      Buffer.add_string b "vec3("; scan x; Buffer.add_char b ','; scan y;
       Buffer.add_char b ','; scan z; Buffer.add_char b ')'
   | Assign (dv, lsa, e) ->
       Buffer.add_string b (string_of_destvar dv);
@@ -907,10 +959,16 @@ let array_of_stages stage_defs ns =
 		arr.(sn).colour_part <- Some ccomp
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs
-      with ((Bad_avar e) as exc) ->
-        let s = string_of_expression e in
-	Printf.fprintf stderr "In '%s':\n" s;
-	raise exc)
+      with
+        ((Bad_avar e) as exc) ->
+          let s = string_of_expression e in
+	  Printf.fprintf stderr "In '%s':\n" s;
+	  raise exc
+      | Unrecognized_indirect_texcoord_part (fn, ex) ->
+          Printf.fprintf stderr
+	    "Unrecognized part in indirect texcoord expression '%s', %s\n"
+	    fn (string_of_expression ex);
+	  exit 1)
     stage_defs;
   arr
 
@@ -1131,6 +1189,77 @@ let string_of_const cst alpha =
   | _ -> failwith "Bad constant" in
   ac ^ tail
 
+let string_of_indtexidx = function
+    None -> "<NOT SET>"
+  | Some x -> "GX_INDTEXSTAGE" ^ string_of_int x
+
+let string_of_format = function
+    3 -> "GX_ITF_3"
+  | 4 -> "GX_ITF_4"
+  | 5 -> "GX_ITF_5"
+  | 8 -> "GX_ITF_8"
+  | _ -> failwith "Bad format"
+
+exception Bad_ind_bias of float * float * float
+
+let string_of_indbias fmt bias =
+  if fmt == 8 then begin
+    match bias with
+      [|    0.0;    0.0;    0.0 |] -> "GX_ITB_NONE"
+    | [| -128.0;    0.0;    0.0 |] -> "GX_ITB_S"
+    | [|    0.0; -128.0;    0.0 |] -> "GX_ITB_T"
+    | [| -128.0; -128.0;    0.0 |] -> "GX_ITB_ST"
+    | [|    0.0;    0.0; -128.0 |] -> "GX_ITB_U"
+    | [| -128.0;    0.0; -128.0 |] -> "GX_ITB_SU"
+    | [|    0.0; -128.0; -128.0 |] -> "GX_ITB_TU"
+    | [| -128.0; -128.0; -128.0 |] -> "GX_ITB_STU"
+    | _ -> raise (Bad_ind_bias (bias.(0), bias.(1), bias.(2)))
+  end else begin
+    match bias with
+      [| 0.0; 0.0; 0.0 |] -> "GX_ITB_NONE"
+    | [| 1.0; 0.0; 0.0 |] -> "GX_ITB_S"
+    | [| 0.0; 1.0; 0.0 |] -> "GX_ITB_T"
+    | [| 1.0; 1.0; 0.0 |] -> "GX_ITB_ST"
+    | [| 0.0; 0.0; 1.0 |] -> "GX_ITB_U"
+    | [| 1.0; 0.0; 1.0 |] -> "GX_ITB_SU"
+    | [| 0.0; 1.0; 1.0 |] -> "GX_ITB_TU"
+    | [| 1.0; 1.0; 1.0 |] -> "GX_ITB_STU"
+    | _ -> raise (Bad_ind_bias (bias.(0), bias.(1), bias.(2)))
+  end
+
+let string_of_mtxidx mtx scale =
+  match mtx, scale with
+    Ind_matrix 0, 0 -> "GX_ITM_0"
+  | Ind_matrix 1, 1 -> "GX_ITM_1"
+  | Ind_matrix 2, 2 -> "GX_ITM_2"
+  | Dyn_S, 0 -> "GX_ITM_S0"
+  | Dyn_S, 1 -> "GX_ITM_S1"
+  | Dyn_S, 2 -> "GX_ITM_S2"
+  | Dyn_T, 0 -> "GX_ITM_T0"
+  | Dyn_T, 1 -> "GX_ITM_T1"
+  | Dyn_T, 2 -> "GX_ITM_T2"
+  | _ -> failwith "Bad indirect matrix/scale combination"
+
+let string_of_wrap = function
+    None -> "GX_ITW_OFF"
+  | Some 0l -> "GX_ITW_0"
+  | Some 16l -> "GX_ITW_16"
+  | Some 32l -> "GX_ITW_32"
+  | Some 64l -> "GX_ITW_64"
+  | Some 128l -> "GX_ITW_128"
+  | Some 256l -> "GX_ITW_256"
+  | _ -> failwith "Bad wrap"
+
+let string_of_gx_bool = function
+    false -> "GX_FALSE"
+  | true -> "GX_TRUE"
+
+let string_of_alpha_select = function
+    None -> "GX_ITBA_OFF"
+  | Some S -> "GX_ITBA_S"
+  | Some T -> "GX_ITBA_T"
+  | Some U -> "GX_ITBA_U"
+
 let print_const_setup stage cst ~alpha =
   if alpha then
     Printf.printf "GX_SetTevKAlphaSel (%s, %s);\n" (string_of_stagenum stage)
@@ -1239,7 +1368,17 @@ let print_indirect_setup stagenum ind_part =
   match ind_part with
     None -> Printf.printf "GX_SetTevDirect (%s);\n"
 	      (string_of_stagenum stagenum)
-  | Some ind -> ()
+  | Some ind ->
+      Printf.printf
+        "GX_SetTevIndirect (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);\n"
+	(string_of_stagenum stagenum) (string_of_indtexidx ind.ind_tex_id)
+	(string_of_format ind.ind_tex_format)
+	(string_of_indbias ind.ind_tex_format ind.ind_tex_bias)
+	(string_of_mtxidx ind.ind_tex_matrix ind.ind_tex_scale)
+	(string_of_wrap ind.ind_tex_wrap_s) (string_of_wrap ind.ind_tex_wrap_t)
+	(string_of_gx_bool ind.ind_tex_addprev)
+	(string_of_gx_bool ind.ind_tex_modified_lod)
+	(string_of_alpha_select ind.ind_tex_alpha_select)
 
 let _ =
   let parsed_stages = parse_channel stdin in
@@ -1256,7 +1395,8 @@ let _ =
         None, Some ap -> ap.texmap, ap.colchan, ap.indirect
       | Some cp, None -> cp.texmap, cp.colchan, cp.indirect
       | Some cp, Some ap ->
-          let a, b = combine_tev_orders cp ap in a, b, cp.indirect
+          let a, b = combine_tev_orders cp ap in
+	  a, b, merge_indirect ap.indirect cp.indirect
       | None, None -> failwith "Missing tev stage!" in
     print_swap_setup i swap_tables stage_arr.(i).merged_tex_swaps
 		     stage_arr.(i).merged_ras_swaps;

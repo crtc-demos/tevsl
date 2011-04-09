@@ -4,7 +4,7 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
-%token LBRACE RBRACE DOT ACCUM DEACCUM MATMUL MODULUS
+%token LBRACE RBRACE DOT ACCUM DEACCUM MATMUL MODULUS VEC3
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE
@@ -86,6 +86,9 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | MIX LPAREN a = stage_expr COMMA b = stage_expr COMMA
 	    c = stage_expr RPAREN
 					{ Expr.Mix (a, b, c) }
+	  | VEC3 LPAREN a = stage_expr COMMA b = stage_expr COMMA
+	    c = stage_expr RPAREN
+					{ Expr.Vec3 (a, b, c) }
 	  | e = stage_expr DOT c = CHANSELECT
 					{ Expr.Select (e, c) }
 	  | e = stage_expr LBRACE c = CHANSELECT RBRACE

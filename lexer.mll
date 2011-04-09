@@ -127,6 +127,7 @@ rule token = parse
   | "?"		    { QUESTIONMARK }
   | "clamp"	    { CLAMP }
   | "mix"	    { MIX }
+  | "vec3"	    { VEC3 }
   | "."		    { DOT }
   | chanselect as c { let arr = Array.create (String.length c) Expr.R in
 		      for i = 0 to String.length c - 1 do

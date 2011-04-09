@@ -9,6 +9,7 @@ type expr =
   | Matmul of expr * expr
   | Divide of expr * expr
   | Modulus of expr * expr
+  | Vec3 of expr * expr * expr
   | Var_ref of var_param
   | Neg of expr
   | Clamp of expr
