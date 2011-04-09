@@ -858,6 +858,18 @@ let num_stages stage_defs =
 let print_num_stages ns =
   Printf.printf "GX_SetNumTevStages (%d);\n" ns
 
+(* If there are no colour channels, at least one texture coordinate must be
+   generated.  Enforce that here.  *)
+let print_num_channels colchans texchans =
+  let colchans', texchans' =
+    match colchans, texchans with
+      0, 0 -> 0, 1
+    | c, _ when c > 2 -> failwith "Too many colour channels"
+    | _, t when t > 8 -> failwith "Too many texture coordinates"
+    | c, t -> c, t in
+  Printf.printf "GX_SetNumChans (%d);\n" colchans';
+  Printf.printf "GX_SetNumTexGens (%d);\n" texchans'
+
 exception Cant_match_stage of int
 
 let compile_expr stage orig_expr ~alpha ac_var_of_expr =
@@ -968,6 +980,39 @@ let array_of_stages stage_defs ns =
 	  exit 1)
     stage_defs;
   arr
+
+let max_colour_and_texcoord_channels stage_arr =
+  let colchans = ref 0
+  and texchans = ref 0 in
+  let bump_colchans = function
+      Some (Colour0 | Alpha0 | Colour0A0) ->
+	if !colchans < 1 then
+          colchans := 1
+    | Some (Colour1 | Alpha1 | Colour1A1) ->
+	if !colchans < 2 then
+          colchans := 2
+    | _ -> ()
+  and bump_texchans = function
+      Some (_, tc) ->
+        if tc + 1 > !texchans then
+	  texchans := tc + 1
+    | None -> () in
+  Array.iter
+    (fun stage ->
+      begin match stage.colour_part with
+        None -> ()
+      | Some cp ->
+          bump_colchans cp.colchan;
+	  bump_texchans cp.texmap
+      end;
+      begin match stage.alpha_part with
+        None -> ()
+      | Some ap ->
+          bump_colchans ap.colchan;
+	  bump_texchans ap.texmap
+      end)
+    stage_arr;
+  !colchans, !texchans
 
 let print_swaps snum t_or_r lsa =
   Printf.printf "stage %d: %s swaps: %s\n" snum t_or_r
@@ -1437,11 +1482,23 @@ let print_indirect_setup stagenum ind_lookups ind_part =
 	(string_of_alpha_select ind.ind_tex_alpha_select)
 
 let _ =
-  let parsed_stages = parse_channel stdin in
+  let in_file = ref ""
+  and out_file = ref "" in
+  Arg.parse ["-o", Arg.Set_string out_file, "Output file"]
+            (fun i -> in_file := i)
+	    "Usage: tevsl <infile> -o <outfile>";
+  if !in_file = "" then
+    failwith "Missing input file";
+  if !out_file = "" then
+    failwith "Missing output file";
+  let inchan = open_in !in_file in
+  let parsed_stages = parse_channel inchan in
   let num_stages = num_stages parsed_stages in
   print_num_stages num_stages;
-  print_newline ();
   let stage_arr = array_of_stages parsed_stages num_stages in
+  let num_colchans, num_texchans = max_colour_and_texcoord_channels stage_arr in
+  print_num_channels num_colchans num_texchans;
+  print_newline ();
   let swap_tables = gather_swap_tables stage_arr in
   let indirect_lookups = gather_indirect_lookups stage_arr in
   print_swap_tables swap_tables;
