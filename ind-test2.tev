@@ -1,3 +1,4 @@
 stage 0:
-  tevprev.rgb = texmap0[texcoord0 % 32 + (indmtx0 ** (texmap1[texcoord1] + 1.0)) * indscale1];
-  tevprev.a = bumpalpha;
+  tevprev.rgb = texmap0[texcoord0 % 32
+			+ (indmtx0 ** (texmap1[texcoord1]
+				       + vec3 (0, -128, 0))) * indscale0];

@@ -12,7 +12,7 @@ let bias_of_expr = function
   | Float x -> raise (Bad_float x)
   | _ -> raise Bad_bias
 
-exception Bad_cvar
+exception Bad_cvar of expr
 
 let cvar_of_expr = function
     Var_ref Cprev -> CC_cprev
@@ -34,7 +34,7 @@ let cvar_of_expr = function
   | Int 0l | Float 0.0 -> CC_zero
   | Int x -> raise (Bad_int x)
   | Float x -> raise (Bad_float x)
-  | _ -> raise Bad_cvar
+  | e -> raise (Bad_cvar e)
 
 exception Bad_avar of expr
 
@@ -384,11 +384,11 @@ exception Unmatched_expr
 let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
   match expr with
     Assign (dv, _, Mult (Plus
-		       (Plus
-		         (d, Plus (Mult (Minus (Int 1l, c), a),
-				   Mult (c2, b))),
-		        tevbias),
-		      tevscale)) when c = c2 ->
+			  (Plus
+		            (d, Plus (Mult (Minus (Int 1l, c), a),
+				      Mult (c2, b))),
+		           tevbias),
+			 tevscale)) when c = c2 ->
       Arith { a = ac_var_of_expr a;
               b = ac_var_of_expr b;
 	      c = ac_var_of_expr c;
@@ -399,11 +399,11 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 	      clamp = false;
 	      result = dv }
   | Assign (dv, _, Mult (Plus
-		       (Minus
-			 (d, Plus (Mult (Minus (Int 1l, c), a),
-				   Mult (c2, b))),
-		        tevbias),
-		      tevscale)) when c = c2 ->
+			  (Minus
+			    (d, Plus (Mult (Minus (Int 1l, c), a),
+				      Mult (c2, b))),
+		           tevbias),
+			 tevscale)) when c = c2 ->
       Arith { a = ac_var_of_expr a;
               b = ac_var_of_expr b;
 	      c = ac_var_of_expr c;
@@ -691,6 +691,24 @@ let rec rewrite_expr = function
 			      Mult (Int 0l, Int 0l))),
 		  Int 0l),
 	    Int 1l)
+  | Plus (Var_ref x, Var_ref y) ->
+      Mult (Plus (Plus (Var_ref x, Plus (Mult (Minus (Int 1l, Int 0l),
+					       Var_ref y),
+					 Mult (Int 0l, Int 0l))),
+		  Int 0l),
+	    Int 1l)
+  | Minus (Var_ref x, Var_ref y) ->
+      Mult (Plus (Minus (Var_ref x, Plus (Mult (Minus (Int 1l, Int 0l),
+						Var_ref y),
+					  Mult (Int 0l, Int 0l))),
+		  Int 0l),
+	    Int 1l)
+  | Plus (Minus (Var_ref x, Var_ref y), Float 0.5) ->
+      Mult (Plus (Minus (Var_ref x, Plus (Mult (Minus (Int 1l, Int 0l),
+						Var_ref y),
+					  Mult (Int 0l, Int 0l))),
+		  Float 0.5),
+	    Int 1l)
   | Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b)) when c = c2 ->
       Mult (Plus (Plus (Int 0l,
 			Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
@@ -855,20 +873,20 @@ let num_stages stage_defs =
     stage_defs
     0
 
-let print_num_stages ns =
-  Printf.printf "GX_SetNumTevStages (%d);\n" ns
+let print_num_stages oc ns =
+  Printf.fprintf oc "GX_SetNumTevStages (%d);\n" ns
 
 (* If there are no colour channels, at least one texture coordinate must be
    generated.  Enforce that here.  *)
-let print_num_channels colchans texchans =
+let print_num_channels oc colchans texchans =
   let colchans', texchans' =
     match colchans, texchans with
       0, 0 -> 0, 1
     | c, _ when c > 2 -> failwith "Too many colour channels"
     | _, t when t > 8 -> failwith "Too many texture coordinates"
     | c, t -> c, t in
-  Printf.printf "GX_SetNumChans (%d);\n" colchans';
-  Printf.printf "GX_SetNumTexGens (%d);\n" texchans'
+  Printf.fprintf oc "GX_SetNumChans (%d);\n" colchans';
+  Printf.fprintf oc "GX_SetNumTexGens (%d);\n" texchans'
 
 exception Cant_match_stage of int
 
@@ -973,6 +991,10 @@ let array_of_stages stage_defs ns =
           let s = string_of_expression e in
 	  Printf.fprintf stderr "In '%s':\n" s;
 	  raise exc
+      | ((Bad_cvar e) as exc) ->
+          let s = string_of_expression e in
+	  Printf.fprintf stderr "In '%s':\n" s;
+	  raise exc
       | Unrecognized_indirect_texcoord_part (fn, ex) ->
           Printf.fprintf stderr
 	    "Unrecognized part in indirect texcoord expression '%s', %s\n"
@@ -1014,9 +1036,9 @@ let max_colour_and_texcoord_channels stage_arr =
     stage_arr;
   !colchans, !texchans
 
-let print_swaps snum t_or_r lsa =
-  Printf.printf "stage %d: %s swaps: %s\n" snum t_or_r
-		(string_of_laneselect lsa ~reverse:false)
+let print_swaps oc snum t_or_r lsa =
+  Printf.fprintf oc "stage %d: %s swaps: %s\n" snum t_or_r
+		 (string_of_laneselect lsa ~reverse:false)
 
 let set_swap_don't_cares sel ~alpha =
   match sel with
@@ -1348,17 +1370,17 @@ let string_of_alpha_select = function
   | Some T -> "GX_ITBA_T"
   | Some U -> "GX_ITBA_U"
 
-let print_const_setup stage cst ~alpha =
+let print_const_setup oc stage cst ~alpha =
   if alpha then
-    Printf.printf "GX_SetTevKAlphaSel (%s, %s);\n" (string_of_stagenum stage)
-      (string_of_const cst true)
+    Printf.fprintf oc "GX_SetTevKAlphaSel (%s, %s);\n"
+      (string_of_stagenum stage) (string_of_const cst true)
   else
-    Printf.printf "GX_SetTevKColorSel (%s, %s);\n" (string_of_stagenum stage)
-      (string_of_const cst false)
+    Printf.fprintf oc "GX_SetTevKColorSel (%s, %s);\n"
+      (string_of_stagenum stage) (string_of_const cst false)
 
 (* Print a normal (direct) texture lookup order.  *)
 
-let print_tev_order stage_num texmap colchan =
+let print_tev_order oc stage_num texmap colchan =
   let tm, tc = match texmap with
     None -> "GX_TEXMAP_NULL", "GX_TEXCOORDNULL"
   | Some (tm, tc) ->
@@ -1366,30 +1388,30 @@ let print_tev_order stage_num texmap colchan =
   and cc = match colchan with
     None -> "GX_COLORNULL"
   | Some c -> string_of_colour_chan c in
-  Printf.printf "GX_SetTevOrder (%s, %s, %s, %s);\n"
+  Printf.fprintf oc "GX_SetTevOrder (%s, %s, %s, %s);\n"
     (string_of_stagenum stage_num) tc tm cc
 
-let print_tev_setup stage_num stage_op string_of_ac_input ~alpha =
+let print_tev_setup oc stage_num stage_op string_of_ac_input ~alpha =
   let acin, acop = if alpha then
     "GX_SetTevAlphaIn", "GX_SetTevAlphaOp"
   else
     "GX_SetTevColorIn", "GX_SetTevColorOp" in
   match stage_op with
     Arith ar -> 
-      Printf.printf "%s (%s, %s, %s, %s, %s);\n" acin
+      Printf.fprintf oc "%s (%s, %s, %s, %s, %s);\n" acin
         (string_of_stagenum stage_num) (string_of_ac_input ar.a)
 	(string_of_ac_input ar.b) (string_of_ac_input ar.c)
 	(string_of_ac_input ar.d);
-      Printf.printf "%s (%s, %s, %s, %s, %s, %s);\n" acop
+      Printf.fprintf oc "%s (%s, %s, %s, %s, %s, %s);\n" acop
         (string_of_stagenum stage_num) (string_of_tev_op ar.op)
 	(string_of_bias ar.bias) (string_of_scale ar.scale)
 	(string_of_clamp ar.clamp) (string_of_result ar.result)
   | Comp cmp ->
-      Printf.printf "%s (%s, %s, %s, %s, %s);\n" acin
+      Printf.fprintf oc "%s (%s, %s, %s, %s, %s);\n" acin
         (string_of_stagenum stage_num) (string_of_ac_input cmp.cmp_a)
 	(string_of_ac_input cmp.cmp_b) (string_of_ac_input cmp.cmp_c)
 	(string_of_ac_input cmp.cmp_d);
-      Printf.printf
+      Printf.fprintf oc
         "%s (%s, %s, GX_TB_ZERO, GX_CS_SCALE_1, GX_FALSE, %s);\n" acop
         (string_of_stagenum stage_num) (string_of_cmp_op cmp.cmp_op)
 	(string_of_result cmp.cmp_result)
@@ -1405,12 +1427,12 @@ let string_of_swap_table n =
 
 exception Too_many_swap_tables
 
-let print_swap_tables swap_tables =
+let print_swap_tables oc swap_tables =
   if Array.length swap_tables > 4 then
     raise Too_many_swap_tables;
   Array.iteri
     (fun i tab ->
-      Printf.printf "GX_SetSwapModeTable (%s, %s, %s, %s, %s);\n"
+      Printf.fprintf oc "GX_SetTevSwapModeTable (%s, %s, %s, %s, %s);\n"
         (string_of_swap_table i) (string_of_chan tab.(0))
 	(string_of_chan tab.(1)) (string_of_chan tab.(2))
 	(string_of_chan tab.(3)))
@@ -1432,7 +1454,7 @@ let matching_swap_table_entry swap_tables table =
     | Some f -> f
   end
 
-let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
+let print_swap_setup oc stagenum swap_tables tex_swaps ras_swaps =
   let tnum, rnum =
     match tex_swaps, ras_swaps with
       Some ts, Some rs ->
@@ -1447,7 +1469,7 @@ let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
   if tnum != -1 || rnum != -1 then begin
     let tnum' = if tnum == -1 then 0 else tnum
     and rnum' = if rnum == -1 then 0 else rnum in
-    Printf.printf "GX_SetTevSwapMode (%s, %s, %s);\n"
+    Printf.fprintf oc "GX_SetTevSwapMode (%s, %s, %s);\n"
       (string_of_stagenum stagenum) (string_of_swap_table rnum')
       (string_of_swap_table tnum')
   end
@@ -1455,21 +1477,21 @@ let print_swap_setup stagenum swap_tables tex_swaps ras_swaps =
 let string_of_ind_tev_stage n =
   "GX_INDTEVSTAGE" ^ (string_of_int n)
 
-let print_indirect_lookups lut_arr =
-  Printf.printf "GX_SetNumIndStages (%d);\n" (Array.length lut_arr);
+let print_indirect_lookups oc lut_arr =
+  Printf.fprintf oc "GX_SetNumIndStages (%d);\n" (Array.length lut_arr);
   for i = 0 to Array.length lut_arr - 1 do
     let tm, tc = lut_arr.(i) in
-    Printf.printf
+    Printf.fprintf oc
       "GX_SetIndTexOrder (GX_INDTEVSTAGE%d, GX_TEXMAP%d, GX_TEXCOORD%d);\n"
       i tm tc
   done
 
-let print_indirect_setup stagenum ind_lookups ind_part =
+let print_indirect_setup oc stagenum ind_lookups ind_part =
   match ind_part with
-    None -> Printf.printf "GX_SetTevDirect (%s);\n"
+    None -> Printf.fprintf oc "GX_SetTevDirect (%s);\n"
 	      (string_of_stagenum stagenum)
   | Some ind ->
-      Printf.printf
+      Printf.fprintf oc
         "GX_SetTevIndirect (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);\n"
 	(string_of_stagenum stagenum)
 	(string_of_indtexidx (lookup_indirect ind_lookups ind))
@@ -1492,19 +1514,20 @@ let _ =
   if !out_file = "" then
     failwith "Missing output file";
   let inchan = open_in !in_file in
+  let outchan = open_out !out_file in
   let parsed_stages = parse_channel inchan in
   let num_stages = num_stages parsed_stages in
-  print_num_stages num_stages;
+  print_num_stages outchan num_stages;
   let stage_arr = array_of_stages parsed_stages num_stages in
   let num_colchans, num_texchans = max_colour_and_texcoord_channels stage_arr in
-  print_num_channels num_colchans num_texchans;
-  print_newline ();
+  print_num_channels outchan num_colchans num_texchans;
+  output_char outchan '\n';
   let swap_tables = gather_swap_tables stage_arr in
   let indirect_lookups = gather_indirect_lookups stage_arr in
-  print_swap_tables swap_tables;
-  print_newline ();
-  print_indirect_lookups indirect_lookups;
-  print_newline ();
+  print_swap_tables outchan swap_tables;
+  output_char outchan '\n';
+  print_indirect_lookups outchan indirect_lookups;
+  output_char outchan '\n';
   for i = 0 to num_stages - 1 do
     let texmap, colchan, indir_part =
       match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
@@ -1514,29 +1537,29 @@ let _ =
           let a, b = combine_tev_orders cp ap in
 	  a, b, merge_indirect ap.indirect cp.indirect
       | None, None -> failwith "Missing tev stage!" in
-    print_swap_setup i swap_tables stage_arr.(i).merged_tex_swaps
+    print_swap_setup outchan i swap_tables stage_arr.(i).merged_tex_swaps
 		     stage_arr.(i).merged_ras_swaps;
-    print_tev_order i texmap colchan;
-    print_indirect_setup i indirect_lookups indir_part;
+    print_tev_order outchan i texmap colchan;
+    print_indirect_setup outchan i indirect_lookups indir_part;
     begin match stage_arr.(i).colour_part with
       Some cpart ->
         begin match cpart.const_usage with
-	  Some cst -> print_const_setup i cst ~alpha:false
+	  Some cst -> print_const_setup outchan i cst ~alpha:false
 	| None -> ()
 	end;
-        print_tev_setup i cpart.stage_operation string_of_tev_input
+        print_tev_setup outchan i cpart.stage_operation string_of_tev_input
 			~alpha:false
     | None -> ()
     end;
     begin match stage_arr.(i).alpha_part with
       Some apart ->
         begin match apart.const_usage with
-	  Some cst -> print_const_setup i cst ~alpha:true
+	  Some cst -> print_const_setup outchan i cst ~alpha:true
 	| None -> ()
 	end;
-        print_tev_setup i apart.stage_operation string_of_tev_alpha_input
-			~alpha:true
+        print_tev_setup outchan i apart.stage_operation
+			string_of_tev_alpha_input ~alpha:true
     | None -> ()
     end;
-    print_newline ()
+    output_char outchan '\n'
   done
