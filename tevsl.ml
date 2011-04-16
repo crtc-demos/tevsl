@@ -1051,11 +1051,9 @@ let set_swap_don't_cares sel ~alpha =
 exception Swizzle_collision
 
 let merge_swaps a b =
-  let a' = set_swap_don't_cares a ~alpha:false
-  and b' = set_swap_don't_cares b ~alpha:true in
   Array.init 4
     (fun i ->
-      match a'.(i), b'.(i) with
+      match a.(i), b.(i) with
         (R | G | B | A as c), X -> c
       | X, (R | G | B | A as c) -> c
       | X, X -> X
@@ -1075,11 +1073,24 @@ let swap_matches a b =
   done;
   !matching
 
+exception Swap_substitution_failed
+
 let unique_swaps swaps unique_list =
   if swaps = [| X; X; X; X |]
-     || List.exists (swap_matches swaps) unique_list then
-    unique_list
-  else
+     || List.exists (swap_matches swaps) unique_list then begin
+    let substituted = ref false in
+    let modified_list = List.map
+      (fun existing_entry ->
+        if swap_matches existing_entry swaps && not !substituted then begin
+	  substituted := true;
+	  merge_swaps existing_entry swaps
+	end else
+	  existing_entry)
+      unique_list in
+    if not !substituted then
+      raise Swap_substitution_failed;
+    modified_list
+  end else
     swaps :: unique_list
 
 let gather_swap_tables stage_def_arr =
@@ -1093,7 +1104,8 @@ let gather_swap_tables stage_def_arr =
           let texswaps =
 	    match cpart.tex_swaps, apart.tex_swaps with
 	      Some c_texswaps, Some a_texswaps ->
-		merge_swaps c_texswaps a_texswaps
+		merge_swaps (set_swap_don't_cares c_texswaps ~alpha:false)
+			    (set_swap_don't_cares a_texswaps ~alpha:true)
 	    | Some c_texswaps, None ->
 	        set_swap_don't_cares c_texswaps ~alpha:false
 	    | None, Some a_texswaps ->
@@ -1102,7 +1114,8 @@ let gather_swap_tables stage_def_arr =
 	  and rasswaps =
 	    match cpart.ras_swaps, apart.ras_swaps with
 	      Some c_rasswaps, Some a_rasswaps ->
-		merge_swaps c_rasswaps a_rasswaps
+		merge_swaps (set_swap_don't_cares c_rasswaps ~alpha:false)
+			    (set_swap_don't_cares a_rasswaps ~alpha:true)
 	    | Some c_rasswaps, None ->
 	        set_swap_don't_cares c_rasswaps ~alpha:false
 	    | None, Some a_rasswaps ->
@@ -1131,6 +1144,8 @@ let gather_swap_tables stage_def_arr =
 	  texswaps, rasswaps
        | None, None ->
            [| X; X; X; X |], [| X; X; X; X |] in
+    (* print_swaps stderr i "texture" texswaps;
+    print_swaps stderr i "raster" rasswaps; *)
     swap_tables := unique_swaps texswaps !swap_tables;
     swap_tables := unique_swaps rasswaps !swap_tables;
     stage_def_arr.(i).merged_tex_swaps <- Some texswaps;
