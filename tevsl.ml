@@ -1075,6 +1075,9 @@ let swap_matches a b =
 
 exception Swap_substitution_failed
 
+(* Does this greedy algorithm lead to non-optimal results in some
+   circumstances?  *)
+
 let unique_swaps swaps unique_list =
   if swaps = [| X; X; X; X |]
      || List.exists (swap_matches swaps) unique_list then begin
