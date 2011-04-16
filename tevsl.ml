@@ -1082,17 +1082,14 @@ let unique_swaps swaps unique_list =
   if swaps = [| X; X; X; X |]
      || List.exists (swap_matches swaps) unique_list then begin
     let substituted = ref false in
-    let modified_list = List.map
+    List.map
       (fun existing_entry ->
         if swap_matches existing_entry swaps && not !substituted then begin
 	  substituted := true;
 	  merge_swaps existing_entry swaps
 	end else
 	  existing_entry)
-      unique_list in
-    if not !substituted then
-      raise Swap_substitution_failed;
-    modified_list
+      unique_list
   end else
     swaps :: unique_list
 
