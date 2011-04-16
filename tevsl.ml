@@ -670,7 +670,12 @@ let rec rewrite_rationals = function
 (* FIXME: The "D" input has more significant bits than the A, B and C inputs:
    10-bit signed versus 8-bit unsigned.  This rewriting function doesn't really
    understand that, so we may lose precision.  Maybe fix by introducing a new
-   "accumulate" operator?  *)
+   "accumulate" operator?
+   
+   FIXME2: Many useful expressions (simplified versions of the general form
+   supported by the TEV unit) are missing from this function.  Add them as
+   necessary!  There's no generalised solution algorithm implemented here...
+   though it'd be nice.  *)
 
 let rec rewrite_expr = function
     Var_ref x ->
