@@ -16,4 +16,4 @@ $OCAMLC -c parser.ml
 ocamllex lexer.mll
 $OCAMLC -c lexer.ml
 $OCAMLC -c tevsl.ml
-$OCAMLC lexer.$SUF parser.$SUF expr.$SUF tevsl.$SUF -o tevsl
+$OCAMLC expr.$SUF lexer.$SUF parser.$SUF tevsl.$SUF -o tevsl

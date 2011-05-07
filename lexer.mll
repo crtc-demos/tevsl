@@ -100,6 +100,7 @@ rule token = parse
   | "indscale" (intnum as n)
 		    { INDSCALE (int_of_string n) }
   | "stage"	    { STAGE }
+  | "itexcoord"     { ITEXCOORD }
   | "+"		    { PLUS }
   | "-"		    { MINUS }
   | "@+"	    { ACCUM }
@@ -140,5 +141,7 @@ rule token = parse
 		      done;
 		      CHANSELECT arr }
   | (" "|"\t"|"\n")+
+  		    { token lexbuf }
+  | "#" [^'\n']* "\n"
   		    { token lexbuf }
   | eof             { EOF }

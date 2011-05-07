@@ -25,9 +25,10 @@ type expr =
   | Texcoord of int
   | Indscale of int
   | Indmtx of ind_matrix
+  | Itexcoord
 
 (* X for "don't care".  *)
-and lane_select = R | G | B | A | X
+and lane_select = R | G | B | A | LS_S | LS_T | X
 
 and var_param =
     Cprev
@@ -62,6 +63,7 @@ and dest_var =
   | Tevreg0
   | Tevreg1
   | Tevreg2
+  | Itexc_dst
 
 and const_setting =
     KCSEL_1
@@ -97,6 +99,7 @@ and ind_matrix =
     Ind_matrix of int
   | Dyn_S
   | Dyn_T
+  | No_matrix
 
 (* 
     TevColorIn: a b c d
@@ -193,3 +196,4 @@ and 'av_tev tev =
     Arith of 'av_tev arith_op
   | Comp of 'av_tev compare_op
 
+exception Parsing_stage of Lexing.position * Lexing.position

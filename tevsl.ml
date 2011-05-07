@@ -126,7 +126,7 @@ let rewrite_const expr ~alpha =
   | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
   | Concat (e, ls) -> Concat (scan e, ls)
   | (Float _ | Int _ | Var_ref _ | Texmap _ | Indmtx _ | Indscale _
-     | Texcoord _ as i) -> i
+     | Texcoord _ | Itexcoord as i) -> i
   | Select (a, la) -> Select (scan a, la) in
   let expr' = scan expr in
   expr', !which_const
@@ -191,7 +191,7 @@ let rewrite_swap_tables expr ~alpha =
   | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
   | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
   | Var_ref x -> Var_ref x
-  | (Indmtx _ | Indscale _ | Texcoord _ as i) -> i
+  | (Indmtx _ | Indscale _ | Texcoord _ | Itexcoord as i) -> i
   | Select (x, lx) -> Select (scan x, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
@@ -242,7 +242,7 @@ let match_tm_maybe_bias = function
   | Plus (Texmap (tm, Texcoord tc), bias) -> tm, tc, match_bias bias
   | x -> raise (Unrecognized_indirect_texcoord_part ("texmap", x))
 
-let rewrite_indirect_texcoord = function
+let rec rewrite_indirect_texcoord = function
     Plus (tc_modulus_or_not, Mult (Matmul (Indmtx im, tm_bias_or_not),
 				   Indscale is)) ->
       let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not
@@ -283,6 +283,27 @@ let rewrite_indirect_texcoord = function
         } in
       (* Texcoord is zeroed out anyway: pick zero.  *)
       Texmap (texmap, Texcoord 0), ind_info
+  | Plus (x, Itexcoord) | Plus (Itexcoord, x) ->
+      let tm, itc = rewrite_indirect_texcoord x in
+      tm, { itc with ind_tex_addprev = true }
+  | (Texcoord _ | Modulus _ as tc_modulus_or_not) ->
+      let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not in
+      let ind_info =
+        {
+	  ind_texmap = -1;
+	  ind_texcoord = -1;
+	  ind_tex_format = 8;
+	  ind_tex_bias = [| 0.0; 0.0; 0.0 |];
+	  ind_tex_matrix = No_matrix;
+	  ind_tex_scale = -1;
+	  ind_tex_wrap_s = modu;
+	  ind_tex_wrap_t = modu;
+	  ind_tex_addprev = false;
+	  ind_tex_modified_lod = true;
+	  ind_tex_alpha_select = None;
+	  ind_tex_coordscale = None
+	} in
+      Texmap (-1, Texcoord texcoord), ind_info
   | x -> raise (Unrecognized_indirect_texcoord_part ("indirect", x))
 
 let merge_indirect a b =
@@ -325,7 +346,8 @@ let rewrite_texmaps expr ~alpha =
       let plain_texcoord, istuff = rewrite_indirect_texcoord itc in
       indirect_stuff := Some istuff;
       scan plain_texcoord
-  | (Float _ | Int _ | Texcoord _ | Indmtx _ | Indscale _ as i) -> i
+  | (Float _ | Int _ | Texcoord _ | Indmtx _ | Indscale _
+     | Itexcoord as i) -> i
   | Select (v, lx) -> Select (scan v, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
@@ -373,7 +395,7 @@ let rewrite_colchans expr ~alpha =
   | Var_ref AlphaBumpN ->
       set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
   | (Var_ref _ | Texmap _ | Float _ | Int _ | Indmtx _ | Indscale _
-     | Texcoord _ as i) -> i
+     | Texcoord _ | Itexcoord as i) -> i
   | Select (v, lx) -> Select (scan v, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
@@ -663,7 +685,7 @@ let rec rewrite_rationals = function
   | Float 1.0 -> Int 1l
   | Float 0.0 -> Int 0l
   | (Float _ | Int _ | Var_ref _ | Texmap _ | Texcoord _ | Indmtx _
-     | Indscale _ as i) -> i
+     | Indscale _ | Itexcoord as i) -> i
   | Select (x, lx) -> Select (rewrite_rationals x, lx)
   | Concat (x, lx) -> Concat (rewrite_rationals x, lx)
 
@@ -774,6 +796,8 @@ let string_of_laneselect lsa ~reverse =
      | G -> if reverse then "g" ^ acc else acc ^ "g"
      | B -> if reverse then "b" ^ acc else acc ^ "b"
      | A -> if reverse then "a" ^ acc else acc ^ "a"
+     | LS_S -> if reverse then "s" ^ acc else acc ^ "s"
+     | LS_T -> if reverse then "t" ^ acc else acc ^ "t"
      | X -> if reverse then "?" ^ acc else acc ^ "?")
     ""
     lsa
@@ -783,11 +807,13 @@ let string_of_destvar = function
   | Tevreg0 -> "tevreg0"
   | Tevreg1 -> "tevreg1"
   | Tevreg2 -> "tevreg2"
+  | Itexc_dst -> "itexcoord"
 
 let string_of_indmtx = function
     Ind_matrix i -> "indmtx" ^ string_of_int i
   | Dyn_S -> "s_dynmtx"
   | Dyn_T -> "t_dynmtx"
+  | No_matrix -> "no_matrix"
 
 let string_of_expression expr =
   let b = Buffer.create 20 in
@@ -847,7 +873,8 @@ let string_of_expression expr =
       Buffer.add_char b ']'
   | Texcoord t -> Buffer.add_string b ("texcoord" ^ string_of_int t)
   | Indmtx i -> Buffer.add_string b (string_of_indmtx i)
-  | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s) in
+  | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s)
+  | Itexcoord -> Buffer.add_string b "itexcoord" in
   scan expr;
   Buffer.contents b
 
@@ -989,6 +1016,8 @@ let array_of_stages stage_defs ns =
 		  compile_expr sn stage_expr ~alpha:true avar_of_expr in
 		arr.(sn).alpha_part <- Some acomp;
 		arr.(sn).colour_part <- Some ccomp
+	    | Assign (_, [| LS_S; LS_T |], _) ->
+	        ()
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs
       with
@@ -1260,6 +1289,7 @@ let string_of_result = function
   | Tevreg0 -> "GX_TEVREG0"
   | Tevreg1 -> "GX_TEVREG1"
   | Tevreg2 -> "GX_TEVREG2"
+  | Itexc_dst -> failwith "unexpected itexcoord result"
 
 let string_of_cmp_op = function
     CMP_r8_gt -> "GX_TEV_COMP_R8_GT"
@@ -1368,6 +1398,7 @@ let string_of_mtxidx mtx scale =
   | Dyn_T, 0 -> "GX_ITM_T0"
   | Dyn_T, 1 -> "GX_ITM_T1"
   | Dyn_T, 2 -> "GX_ITM_T2"
+  | No_matrix, _ -> "GX_ITM_OFF"
   | _ -> failwith "Bad indirect matrix/scale combination"
 
 let string_of_wrap = function
@@ -1441,6 +1472,7 @@ let string_of_chan = function
   | G -> "GX_CH_GREEN"
   | B -> "GX_CH_BLUE"
   | A -> "GX_CH_ALPHA"
+  | LS_S | LS_T -> failwith "unexpected texcoord selector"
 
 let string_of_swap_table n =
   "GX_TEV_SWAP" ^ (string_of_int n)
@@ -1535,7 +1567,13 @@ let _ =
     failwith "Missing output file";
   let inchan = open_in !in_file in
   let outchan = open_out !out_file in
-  let parsed_stages = parse_channel inchan in
+  let parsed_stages = try
+    parse_channel inchan
+  with Expr.Parsing_stage (st, en) ->
+    Printf.fprintf stderr "Parse error: line %d[%d] to %d[%d]\n"
+      st.Lexing.pos_lnum st.Lexing.pos_bol en.Lexing.pos_lnum
+      en.Lexing.pos_bol;
+      exit 1 in
   let num_stages = num_stages parsed_stages in
   print_num_stages outchan num_stages;
   let stage_arr = array_of_stages parsed_stages num_stages in

@@ -1,0 +1,25 @@
+# Regular colour lookup (texmap0 is regular texture)
+stage 0:
+  tevprev = texmap0[texcoord0];
+
+# Texcoord offset in S direction (texmap2 is bump texture)
+stage 1:
+  itexcoord = (s_dynmtx (texcoord1) ** (texmap2[texcoord0]
+					+ vec3 (-128.0, -128.0, 0)))
+	      * indscale0;
+  tevprev.rgb = cprev;
+  tevprev.a = aprev;
+
+# Texcoord offset in T direction
+stage 2:
+  itexcoord = itexcoord + ((t_dynmtx (texcoord2) ** texmap2[texcoord0])
+			   + vec3 (-128.0, -128.0, 0)) * indscale0;
+  tevprev.rgb = cprev;
+  tevprev.a = aprev;
+
+# Do light-texture lookup from texmap1, and merge with regular texture.
+# From light texture, alpha is specular part, RGB is diffuse part.
+stage 3:
+  tevprev.rgb = texmap1[itexcoord + texcoord3].a
+                + cprev * texmap1[itexcoord + texcoord3].rgb;
+  tevprev.a = aprev;

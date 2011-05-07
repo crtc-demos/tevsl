@@ -4,7 +4,7 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
-%token LBRACE RBRACE DOT ACCUM DEACCUM MATMUL MODULUS VEC3
+%token LBRACE RBRACE DOT ACCUM DEACCUM MATMUL MODULUS VEC3 ITEXCOORD
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE
@@ -33,6 +33,8 @@ stage_def: sn = stage_num ses = stage_exprs
 ;
 
 stage_num: STAGE n = INT COLON		{ Int32.to_int n }
+	 | error			{ raise (Expr.Parsing_stage ($startpos,
+								    $endpos)) }
 ;
 
 stage_exprs: /* empty */		{ [] }
@@ -73,6 +75,10 @@ stage_expr: n = INT			{ Expr.Int n }
 					{ Expr.Assign (a,
 					    [| Expr.R; Expr.G; Expr.B;
 					       Expr.A |], b) }
+          | ITEXCOORD ASSIGN i = stage_expr
+					{ Expr.Assign (Expr.Itexc_dst,
+					    [| Expr.LS_S; Expr.LS_T |], i) }
+	  | ITEXCOORD			{ Expr.Itexcoord }
 	  | a = stage_expr EQ b = stage_expr
 					{ Expr.Ceq (a, b) }
 	  | a = stage_expr GT b = stage_expr
