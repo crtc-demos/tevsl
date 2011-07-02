@@ -125,8 +125,8 @@ let rewrite_const expr ~alpha =
   | Select (Var_ref K2, [| A |]) -> set_const KCSEL_K2_A
   | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
   | Concat (e, ls) -> Concat (scan e, ls)
-  | (Float _ | Int _ | Var_ref _ | Texmap _ | Indmtx _ | Indscale _
-     | Texcoord _ | Itexcoord as i) -> i
+  | (Float _ | Int _ | Var_ref _ | Texmap _ | Indmtx _ | D_indmtx _
+     | Indscale _ | Texcoord _ | Itexcoord as i) -> i
   | Select (a, la) -> Select (scan a, la) in
   let expr' = scan expr in
   expr', !which_const
@@ -191,13 +191,19 @@ let rewrite_swap_tables expr ~alpha =
   | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
   | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
   | Var_ref x -> Var_ref x
-  | (Indmtx _ | Indscale _ | Texcoord _ | Itexcoord as i) -> i
+  | (Indmtx _ | D_indmtx _ | Indscale _ | Texcoord _ | Itexcoord as i) -> i
   | Select (x, lx) -> Select (scan x, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
   expr', !texswap, !rasswap
 
 type texcoord = S | T | U
+
+type ind_matrix_type =
+    T_ind_matrix of int
+  | T_no_matrix
+  | T_dyn_s
+  | T_dyn_t
 
 type indirect_info = {
   (* Settings in GX_SetIndTexOrder.  *)
@@ -206,7 +212,7 @@ type indirect_info = {
   (* Settings in GX_SetTevIndirect.  *)
   ind_tex_format : int;
   ind_tex_bias : float array;
-  ind_tex_matrix : ind_matrix;
+  ind_tex_matrix : ind_matrix_type;
   ind_tex_scale : int;
   ind_tex_wrap_s : int32 option;
   ind_tex_wrap_t : int32 option;
@@ -242,9 +248,23 @@ let match_tm_maybe_bias = function
   | Plus (Texmap (tm, Texcoord tc), bias) -> tm, tc, match_bias bias
   | x -> raise (Unrecognized_indirect_texcoord_part ("texmap", x))
 
+let matrix_of_dynmtx = function
+    Dyn_S -> T_dyn_s
+  | Dyn_T -> T_dyn_t
+
+let matrix_of_staticmtx = function
+    Ind_matrix m -> T_ind_matrix m
+  | No_matrix -> T_no_matrix
+
+exception Conflicting_texcoords of int * int
+
+let mix_texcoord a b =
+  if a = b then a else raise (Conflicting_texcoords (a, b))
+
 let rec rewrite_indirect_texcoord = function
-    Plus (tc_modulus_or_not, Mult (Matmul (Indmtx im, tm_bias_or_not),
-				   Indscale is)) ->
+    Plus ((Texcoord _ | Modulus _ as tc_modulus_or_not),
+	  Mult (Matmul (Indmtx im, tm_bias_or_not),
+		Indscale is)) ->
       let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not
       and texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
@@ -253,7 +273,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_texcoord = itexcoord;
 	  ind_tex_format = 8;
 	  ind_tex_bias = bias;
-	  ind_tex_matrix = im;
+	  ind_tex_matrix = matrix_of_staticmtx im;
 	  ind_tex_scale = is;
 	  ind_tex_wrap_s = modu;
 	  ind_tex_wrap_t = modu;
@@ -262,7 +282,29 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
-      Texmap (texmap, Texcoord texcoord), ind_info
+      texcoord, ind_info
+  | Plus ((Texcoord _ | Modulus _ as tc_modulus_or_not),
+	  Mult (Matmul (D_indmtx (st, Texcoord from_coord), tm_bias_or_not),
+		Indscale is)) ->
+      let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not in
+      let mixed_texcoord = mix_texcoord texcoord from_coord
+      and texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      let ind_info =
+        {
+	  ind_texmap = texmap;
+	  ind_texcoord = itexcoord;
+	  ind_tex_format = 8;
+	  ind_tex_bias = bias;
+	  ind_tex_matrix = matrix_of_dynmtx st;
+	  ind_tex_scale = is;
+	  ind_tex_wrap_s = modu;
+	  ind_tex_wrap_t = modu;
+	  ind_tex_addprev = false;
+	  ind_tex_modified_lod = true;
+	  ind_tex_alpha_select = None;
+	  ind_tex_coordscale = None
+        } in
+      mixed_texcoord, ind_info
   | Mult (Matmul (Indmtx im, tm_bias_or_not), Indscale is) ->
       let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
@@ -271,7 +313,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_texcoord = itexcoord;
 	  ind_tex_format = 8;
 	  ind_tex_bias = bias;
-	  ind_tex_matrix = im;
+	  ind_tex_matrix = matrix_of_staticmtx im;
 	  ind_tex_scale = is;
 	  (* Zero modulus -> zero for the regular texture coords.  *)
 	  ind_tex_wrap_s = Some 0l;
@@ -282,7 +324,27 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_coordscale = None
         } in
       (* Texcoord is zeroed out anyway: pick zero.  *)
-      Texmap (texmap, Texcoord 0), ind_info
+      0, ind_info
+  | Mult (Matmul (D_indmtx (st, Texcoord from_coord), tm_bias_or_not),
+	  Indscale is) ->
+      let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      let ind_info =
+        {
+	  ind_texmap = texmap;
+	  ind_texcoord = itexcoord;
+	  ind_tex_format = 8;
+	  ind_tex_bias = bias;
+	  ind_tex_matrix = matrix_of_dynmtx st;
+	  ind_tex_scale = is;
+	  (* Zero modulus -> zero for the regular texture coords.  *)
+	  ind_tex_wrap_s = Some 0l;
+	  ind_tex_wrap_t = Some 0l;
+	  ind_tex_addprev = false;
+	  ind_tex_modified_lod = true;
+	  ind_tex_alpha_select = None;
+	  ind_tex_coordscale = None
+        } in
+      from_coord, ind_info
   | Plus (x, Itexcoord) | Plus (Itexcoord, x) ->
       let tm, itc = rewrite_indirect_texcoord x in
       tm, { itc with ind_tex_addprev = true }
@@ -294,7 +356,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_texcoord = -1;
 	  ind_tex_format = 8;
 	  ind_tex_bias = [| 0.0; 0.0; 0.0 |];
-	  ind_tex_matrix = No_matrix;
+	  ind_tex_matrix = T_no_matrix;
 	  ind_tex_scale = -1;
 	  ind_tex_wrap_s = modu;
 	  ind_tex_wrap_t = modu;
@@ -303,7 +365,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
 	} in
-      Texmap (-1, Texcoord texcoord), ind_info
+      texcoord, ind_info
   | x -> raise (Unrecognized_indirect_texcoord_part ("indirect", x))
 
 let merge_indirect a b =
@@ -345,8 +407,8 @@ let rewrite_texmaps expr ~alpha =
   | Texmap (m, itc) ->
       let plain_texcoord, istuff = rewrite_indirect_texcoord itc in
       indirect_stuff := Some istuff;
-      scan plain_texcoord
-  | (Float _ | Int _ | Texcoord _ | Indmtx _ | Indscale _
+      scan (Texmap (m, Texcoord plain_texcoord))
+  | (Float _ | Int _ | Texcoord _ | Indmtx _ | D_indmtx _ | Indscale _
      | Itexcoord as i) -> i
   | Select (v, lx) -> Select (scan v, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
@@ -394,8 +456,8 @@ let rewrite_colchans expr ~alpha =
   | Var_ref AlphaBump -> set_colchan AlphaBump; Var_ref Rasa
   | Var_ref AlphaBumpN ->
       set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
-  | (Var_ref _ | Texmap _ | Float _ | Int _ | Indmtx _ | Indscale _
-     | Texcoord _ | Itexcoord as i) -> i
+  | (Var_ref _ | Texmap _ | Float _ | Int _ | Indmtx _ | D_indmtx _
+     | Indscale _ | Texcoord _ | Itexcoord as i) -> i
   | Select (v, lx) -> Select (scan v, lx)
   | Concat (x, lx) -> Concat (scan x, lx) in
   let expr' = scan expr in
@@ -685,7 +747,7 @@ let rec rewrite_rationals = function
   | Float 1.0 -> Int 1l
   | Float 0.0 -> Int 0l
   | (Float _ | Int _ | Var_ref _ | Texmap _ | Texcoord _ | Indmtx _
-     | Indscale _ | Itexcoord as i) -> i
+     | D_indmtx _ | Indscale _ | Itexcoord as i) -> i
   | Select (x, lx) -> Select (rewrite_rationals x, lx)
   | Concat (x, lx) -> Concat (rewrite_rationals x, lx)
 
@@ -811,8 +873,6 @@ let string_of_destvar = function
 
 let string_of_indmtx = function
     Ind_matrix i -> "indmtx" ^ string_of_int i
-  | Dyn_S -> "s_dynmtx"
-  | Dyn_T -> "t_dynmtx"
   | No_matrix -> "no_matrix"
 
 let string_of_expression expr =
@@ -873,6 +933,14 @@ let string_of_expression expr =
       Buffer.add_char b ']'
   | Texcoord t -> Buffer.add_string b ("texcoord" ^ string_of_int t)
   | Indmtx i -> Buffer.add_string b (string_of_indmtx i)
+  | D_indmtx (Dyn_S, e) ->
+      Buffer.add_string b "s_dynmtx(";
+      scan e;
+      Buffer.add_char b ')'
+  | D_indmtx (Dyn_T, e) ->
+      Buffer.add_string b "t_dynmtx(";
+      scan e;
+      Buffer.add_char b ')'
   | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s)
   | Itexcoord -> Buffer.add_string b "itexcoord" in
   scan expr;
@@ -881,14 +949,25 @@ let string_of_expression expr =
 type 'ac stage_info = {
   stage_operation : 'ac tev;
   const_usage : const_setting option;
-  texmap : (int * int) option;
+  texmap_texc : (int * int) option;
   indirect : indirect_info option;
   colchan: var_param option;
   tex_swaps : lane_select array option;
   ras_swaps : lane_select array option
 }
 
+(* Direct texmap & texcoord used by indirect "texcoord-only" operations: some
+   of this (which texmap to use) is implicit, and must be filled in
+   automatically by tevsl.  *)
+
+type tex_info = {
+  ind_dir_texcoord : int;
+  ind_dir_texmap : int option
+}
+
 type stage_col_alpha_parts = {
+  mutable ind_texc_part : indirect_info option;
+  mutable ind_direct_tex_part : tex_info option;
   mutable colour_part : cvar_setting stage_info option;
   mutable alpha_part : avar_setting stage_info option;
   mutable merged_tex_swaps : lane_select array option;
@@ -952,7 +1031,7 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
       {
 	stage_operation = tevop;
 	const_usage = const_extr;
-	texmap = texmap_texcoord;
+	texmap_texc = texmap_texcoord;
 	indirect = indtex;
 	colchan = colchan;
 	tex_swaps = texswap;
@@ -979,7 +1058,7 @@ let combine_tev_orders col_order alpha_order =
     | None, None -> None
     | _ -> failwith "Invalid colour/alpha channel combination"
   and combined_texmap =
-    match col_order.texmap, alpha_order.texmap with
+    match col_order.texmap_texc, alpha_order.texmap_texc with
       Some (ctm, ctc), Some (atm, atc) when ctm = atm && ctc = atc ->
         Some (ctm, ctc)
     | Some x, None -> Some x
@@ -992,7 +1071,8 @@ let array_of_stages stage_defs ns =
   let arr =
     Array.init ns
       (fun _ ->
-        { colour_part = None; alpha_part = None; merged_tex_swaps = None;
+        { ind_texc_part = None; ind_direct_tex_part = None; colour_part = None;
+	  alpha_part = None; merged_tex_swaps = None;
 	  merged_ras_swaps = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
@@ -1016,8 +1096,12 @@ let array_of_stages stage_defs ns =
 		  compile_expr sn stage_expr ~alpha:true avar_of_expr in
 		arr.(sn).alpha_part <- Some acomp;
 		arr.(sn).colour_part <- Some ccomp
-	    | Assign (_, [| LS_S; LS_T |], _) ->
-	        ()
+	    | Assign (Itexc_dst, [| LS_S; LS_T |], e) ->
+	        let plain_texcoord, tcomp = rewrite_indirect_texcoord e in
+	        arr.(sn).ind_texc_part <- Some tcomp;
+		arr.(sn).ind_direct_tex_part
+		  <- Some { ind_dir_texcoord = plain_texcoord;
+			    ind_dir_texmap = None }
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs
       with
@@ -1059,13 +1143,23 @@ let max_colour_and_texcoord_channels stage_arr =
         None -> ()
       | Some cp ->
           bump_colchans cp.colchan;
-	  bump_texchans cp.texmap
+	  bump_texchans cp.texmap_texc
       end;
       begin match stage.alpha_part with
         None -> ()
       | Some ap ->
           bump_colchans ap.colchan;
-	  bump_texchans ap.texmap
+	  bump_texchans ap.texmap_texc
+      end;
+      begin match stage.ind_texc_part with
+        None -> ()
+      | Some ip ->
+          bump_texchans (Some (ip.ind_texmap, ip.ind_texcoord));
+      end;
+      begin match stage.ind_direct_tex_part with
+        None -> ()
+      | Some dp ->
+          bump_texchans (Some (0, dp.ind_dir_texcoord))
       end)
     stage_arr;
   !colchans, !texchans
@@ -1193,33 +1287,51 @@ let add_if_different l ls =
   else
     l :: ls
 
+let check_ind_part ipo ind =
+  match ipo with
+    None -> ()
+  | Some cp ->
+      begin match cp.indirect with
+	None -> ()
+      | Some ci -> ignore (merge_indirect ci ind)
+      end
+
 let gather_indirect_lookups stage_arr =
   let ind_luts = ref [] in
   for i = 0 to Array.length stage_arr - 1 do
-    match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
+    begin match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
       None, None -> ()
     | Some cp, None ->
         begin match cp.indirect with
 	  None -> ()
 	| Some ind ->
-	  ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
-				       !ind_luts
+	    ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+					 !ind_luts
 	end
     | None, Some ap ->
         begin match ap.indirect with
 	  None -> ()
 	| Some ind ->
-	  ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
-				       !ind_luts
+	    ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+					 !ind_luts
 	end
     | Some part1, Some part2 ->
         let ind_part = merge_indirect part1.indirect part2.indirect in
         begin match ind_part with
 	  None -> ()
 	| Some ind ->
-	  ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
-				       !ind_luts
+	    ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+					 !ind_luts
 	end
+    end;
+    begin match stage_arr.(i).ind_texc_part with
+      None -> ()
+    | Some ind ->
+	check_ind_part stage_arr.(i).colour_part ind;
+	check_ind_part stage_arr.(i).alpha_part ind;
+	ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
+				     !ind_luts
+    end
   done;
   Array.of_list !ind_luts
 
@@ -1389,16 +1501,16 @@ let string_of_indbias fmt bias =
 
 let string_of_mtxidx mtx scale =
   match mtx, scale with
-    Ind_matrix 0, 0 -> "GX_ITM_0"
-  | Ind_matrix 1, 1 -> "GX_ITM_1"
-  | Ind_matrix 2, 2 -> "GX_ITM_2"
-  | Dyn_S, 0 -> "GX_ITM_S0"
-  | Dyn_S, 1 -> "GX_ITM_S1"
-  | Dyn_S, 2 -> "GX_ITM_S2"
-  | Dyn_T, 0 -> "GX_ITM_T0"
-  | Dyn_T, 1 -> "GX_ITM_T1"
-  | Dyn_T, 2 -> "GX_ITM_T2"
-  | No_matrix, _ -> "GX_ITM_OFF"
+    T_ind_matrix 0, 0 -> "GX_ITM_0"
+  | T_ind_matrix 1, 1 -> "GX_ITM_1"
+  | T_ind_matrix 2, 2 -> "GX_ITM_2"
+  | T_dyn_s, 0 -> "GX_ITM_S0"
+  | T_dyn_s, 1 -> "GX_ITM_S1"
+  | T_dyn_s, 2 -> "GX_ITM_S2"
+  | T_dyn_t, 0 -> "GX_ITM_T0"
+  | T_dyn_t, 1 -> "GX_ITM_T1"
+  | T_dyn_t, 2 -> "GX_ITM_T2"
+  | T_no_matrix, _ -> "GX_ITM_OFF"
   | _ -> failwith "Bad indirect matrix/scale combination"
 
 let string_of_wrap = function
@@ -1587,14 +1699,29 @@ let _ =
   print_indirect_lookups outchan indirect_lookups;
   output_char outchan '\n';
   for i = 0 to num_stages - 1 do
-    let texmap, colchan, indir_part =
+    let ac_texmap, colchan, ac_indir_part =
       match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
-        None, Some ap -> ap.texmap, ap.colchan, ap.indirect
-      | Some cp, None -> cp.texmap, cp.colchan, cp.indirect
+        None, Some ap -> ap.texmap_texc, ap.colchan, ap.indirect
+      | Some cp, None -> cp.texmap_texc, cp.colchan, cp.indirect
       | Some cp, Some ap ->
           let a, b = combine_tev_orders cp ap in
 	  a, b, merge_indirect ap.indirect cp.indirect
       | None, None -> failwith "Missing tev stage!" in
+    let texmap, indir_part =
+      match stage_arr.(i).ind_texc_part with
+        None -> ac_texmap, ac_indir_part
+      | Some ip as sip ->
+          begin match ac_indir_part with
+	    None -> ac_texmap, sip
+	  | Some _ as acip ->
+	      let texmap' =
+	        match stage_arr.(i).ind_direct_tex_part with
+		  None -> ac_texmap
+		| Some ti ->
+		    Some (0 (* FIX! ti.ind_dir_texmap *),
+		          ti.ind_dir_texcoord) in
+	      texmap', merge_indirect sip acip
+	  end in
     print_swap_setup outchan i swap_tables stage_arr.(i).merged_tex_swaps
 		     stage_arr.(i).merged_ras_swaps;
     print_tev_order outchan i texmap colchan;

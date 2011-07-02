@@ -25,6 +25,7 @@ type expr =
   | Texcoord of int
   | Indscale of int
   | Indmtx of ind_matrix
+  | D_indmtx of dyn_ind_matrix * expr
   | Itexcoord
 
 (* X for "don't care".  *)
@@ -97,9 +98,11 @@ and const_setting =
 
 and ind_matrix =
     Ind_matrix of int
-  | Dyn_S
-  | Dyn_T
   | No_matrix
+
+and dyn_ind_matrix =
+    Dyn_S
+  | Dyn_T
 
 (* 
     TevColorIn: a b c d

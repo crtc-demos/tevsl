@@ -95,8 +95,8 @@ rule token = parse
 		    { TEXCOORD (int_of_string n) }
   | "indmtx" (intnum as n)
   		    { INDMTX (Expr.Ind_matrix (int_of_string n)) }
-  | "s_dynmtx"	    { INDMTX Expr.Dyn_S }
-  | "t_dynmtx"	    { INDMTX Expr.Dyn_T }
+  | "s_dynmtx"	    { D_INDMTX Expr.Dyn_S }
+  | "t_dynmtx"	    { D_INDMTX Expr.Dyn_T }
   | "indscale" (intnum as n)
 		    { INDSCALE (int_of_string n) }
   | "stage"	    { STAGE }

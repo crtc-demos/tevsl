@@ -9,6 +9,7 @@
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE
 %token <Expr.ind_matrix> INDMTX
+%token <Expr.dyn_ind_matrix> D_INDMTX
 %token <Expr.var_param> VAR
 %token <Expr.dest_var> DESTVAR
 %token <Expr.lane_select array> CHANSELECT
@@ -95,6 +96,8 @@ stage_expr: n = INT			{ Expr.Int n }
 	  | VEC3 LPAREN a = stage_expr COMMA b = stage_expr COMMA
 	    c = stage_expr RPAREN
 					{ Expr.Vec3 (a, b, c) }
+	  | c = D_INDMTX LPAREN e = stage_expr RPAREN
+					{ Expr.D_indmtx (c, e) }
 	  | e = stage_expr DOT c = CHANSELECT
 					{ Expr.Select (e, c) }
 	  | e = stage_expr LBRACE c = CHANSELECT RBRACE
