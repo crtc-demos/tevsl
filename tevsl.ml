@@ -60,6 +60,43 @@ let scale_of_expr = function
   | Float x -> raise (Bad_float x)
   | _ -> raise Bad_scale
 
+(* This maps EXPR using FUNC, before descending into each node.  This allows
+   FUNC to map larger subexpressions without first mapping their leaves, when
+   FUNC may do a transformation on either.  *)
+
+let map_expr func expr =
+  let rec scan e =
+    match func e with
+      Plus (a, b) -> Plus (scan a, scan b)
+    | Accum (a, b) -> Accum (scan a, scan b)
+    | Deaccum (a, b) -> Deaccum (scan a, scan b)
+    | Minus (a, b) -> Minus (scan a, scan b)
+    | Mult (a, b) -> Mult (scan a, scan b)
+    | Matmul (a, b) -> Matmul (scan a, scan b)
+    | Divide (a, b) -> Divide (scan a, scan b)
+    | Modulus (a, b) -> Modulus (scan a, scan b)
+    | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
+    | Neg a -> Neg (scan a)
+    | Clamp a -> Clamp (scan a)
+    | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
+    | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
+    | Select (e, lsa) -> Select (scan e, lsa)
+    | Concat (e, lsa) -> Concat (scan e, lsa)
+    | Ceq (a, b) -> Ceq (scan a, scan b)
+    | Cgt (a, b) -> Cgt (scan a, scan b)
+    | Clt (a, b) -> Clt (scan a, scan b)
+    | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
+    | Texmap (idx, e) -> Texmap (idx, scan e)
+    | Texcoord tc -> Texcoord tc
+    | Indscale is -> Indscale is
+    | Indmtx im -> Indmtx im
+    | D_indmtx (dim, e) -> D_indmtx (dim, scan e)
+    | Itexcoord -> Itexcoord
+    | Int i -> Int i
+    | Float f -> Float f
+    | Var_ref vp -> Var_ref vp in
+  scan expr
+
 exception Too_many_constants
 
 (* Find special-valued "konst" constants in expression, and separate them
@@ -713,6 +750,28 @@ let rec rewrite_mix = function
   | Ternary (a, b, c) -> Ternary (rewrite_mix a, rewrite_mix b, rewrite_mix c)
   | x -> x
 
+let int_valued_float x =
+  let frac, _ = modf x in
+  frac = 0.0
+
+(* Rewrite "tev.xxx" variables as cprev or aprev as appropriate to context.  *)
+
+let rec rewrite_tev_vars expr ~alpha =
+  map_expr
+    (function
+      Var_ref Tev when not alpha ->
+        Var_ref Cprev
+    | Var_ref Tev when alpha ->
+        Var_ref Aprev
+    | Select (Var_ref Tev, ([| R; G; B |] | [| R; G; B; _ |])) when not alpha ->
+        Var_ref Cprev
+    | Select (Var_ref Tev, ([| A |] | [| A; A; A |])) when not alpha ->
+        Var_ref Aprev
+    | Select (Var_ref Tev, ([| A |] | [| _; _; _; A |])) when alpha ->
+        Var_ref Aprev
+    | x -> x)
+    expr
+
 (* Rewrite "/ 2" as "* 0.5", integer-valued floats as ints, and rationals as
    floats.  *)
 
@@ -742,10 +801,7 @@ let rec rewrite_rationals = function
   | Clt (a, b) -> Clt (rewrite_rationals a, rewrite_rationals b)
   | Ternary (a, b, c) -> Ternary (rewrite_rationals a, rewrite_rationals b,
 				  rewrite_rationals c)
-  | Float 4.0 -> Int 4l
-  | Float 2.0 -> Int 2l
-  | Float 1.0 -> Int 1l
-  | Float 0.0 -> Int 0l
+  | Float x when int_valued_float x -> Int (Int32.of_float x)
   | (Float _ | Int _ | Var_ref _ | Texmap _ | Texcoord _ | Indmtx _
      | D_indmtx _ | Indscale _ | Itexcoord as i) -> i
   | Select (x, lx) -> Select (rewrite_rationals x, lx)
@@ -824,7 +880,9 @@ let rec rewrite_expr = function
   | x -> x
 
 let string_of_var_param = function
-    Cprev -> "cprev"
+    Tev -> "tev"
+  | CR n -> "cr" ^ (string_of_int n)
+  | Cprev -> "cprev"
   | Aprev -> "aprev"
   | C0 -> "c0"
   | A0 -> "a0"
@@ -1002,7 +1060,8 @@ let print_num_channels oc colchans texchans =
 exception Cant_match_stage of int
 
 let compile_expr stage orig_expr ~alpha ac_var_of_expr =
-  let expr = rewrite_rationals orig_expr in
+  let expr = rewrite_tev_vars orig_expr ~alpha in
+  let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
   let expr, const_extr = rewrite_const expr ~alpha in
   let expr, texmap_texcoord, indtex = rewrite_texmaps expr ~alpha in

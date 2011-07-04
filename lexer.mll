@@ -14,14 +14,10 @@ let chanselect = ("r" | "g" | "b" | "a")+
 
 let colour = "colour" | "color"
 
-let var = "cprev"
-        | "aprev"
-	| "c0"
-	| "a0"
-	| "c1"
-	| "a1"
-	| "c2"
-	| "a2"
+let var = "tev"
+	| "cr0"
+	| "cr1"
+	| "cr2"
 	| "k0"
 	| "k1"
 	| "k2"
@@ -51,14 +47,10 @@ rule token = parse
   | var as v
       {
         let vt = match v with
-	  "cprev" -> Expr.Cprev
-	| "aprev" -> Expr.Aprev
-	| "c0" -> Expr.C0
-	| "a0" -> Expr.A0
-	| "c1" -> Expr.C1
-	| "a1" -> Expr.A1
-	| "c2" -> Expr.C2
-	| "a2" -> Expr.A2
+	  "tev" -> Expr.Tev
+	| "cr0" -> Expr.CR 0
+	| "cr1" -> Expr.CR 1
+	| "cr2" -> Expr.CR 2
 	| "k0" -> Expr.K0
 	| "k1" -> Expr.K1
 	| "k2" -> Expr.K2
@@ -78,16 +70,6 @@ rule token = parse
 	| "rasa" -> Expr.Rasa *)
 	| _ -> failwith "Bad variable" in
 	VAR vt
-      }
-  | destvar as dv
-      {
-        let vt = match dv with
-	  "tevprev" -> Expr.Tevprev
-	| "tevreg0" -> Expr.Tevreg0
-	| "tevreg1" -> Expr.Tevreg1
-	| "tevreg2" -> Expr.Tevreg2
-	| _ -> failwith "Bad dest variable" in
-	DESTVAR vt
       }
   | "texmap" (intnum as n)
 		    { TEXMAP (int_of_string n) }

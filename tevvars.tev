@@ -1,0 +1,20 @@
+stage 0:
+  tev.rgba = tev.rgba;
+
+stage 1:
+  tev = tev;
+
+stage 2:
+  tev.rgb = tev.rgb;
+  tev.a = tev.a;
+
+stage 3:
+  tev.rgb = tev.a;
+  tev.a = tev.a;
+
+stage 4:
+  tev.rgb = tev.aaa;
+  tev.a = tev.a;
+
+stage 5:
+  tev.rgba = tev.aaaa;

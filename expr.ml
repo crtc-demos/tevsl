@@ -32,8 +32,10 @@ type expr =
 and lane_select = R | G | B | A | LS_S | LS_T | X
 
 and var_param =
-    Cprev
+    Tev
+  | Cprev
   | Aprev
+  | CR of int
   | C0
   | A0
   | C1
@@ -200,3 +202,12 @@ and 'av_tev tev =
   | Comp of 'av_tev compare_op
 
 exception Parsing_stage of Lexing.position * Lexing.position
+
+exception Bad_dest_var
+
+let destvar_of_var = function
+    Tev -> Tevprev
+  | CR 0 -> Tevreg0
+  | CR 1 -> Tevreg1
+  | CR 2 -> Tevreg2
+  | _ -> raise Bad_dest_var

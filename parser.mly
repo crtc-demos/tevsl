@@ -43,67 +43,71 @@ stage_exprs: /* empty */		{ [] }
 					{ se :: ss }
 ;
 
-stage_expr: n = INT			{ Expr.Int n }
-	  | n = FLOAT			{ Expr.Float n }
-	  | a = stage_expr PLUS b = stage_expr
-					{ Expr.Plus (a, b) }
-	  | a = stage_expr MINUS b = stage_expr
-					{ Expr.Minus (a, b) }
-	  | a = stage_expr ACCUM b = stage_expr
-					{ Expr.Accum (a, b) }
-	  | a = stage_expr DEACCUM b = stage_expr
-					{ Expr.Deaccum (a, b) }
-	  | a = stage_expr MULT b = stage_expr
-					{ Expr.Mult (a, b) }
-	  | a = stage_expr MATMUL b = stage_expr
-					{ Expr.Matmul (a, b) }
-	  | a = stage_expr DIVIDE b = stage_expr
-					{ Expr.Divide (a, b) }
-	  | a = stage_expr MODULUS b = stage_expr
-					{ Expr.Modulus (a, b) }
-	  | LPAREN e = stage_expr RPAREN
-	  				{ e }
-	  | v = VAR 			{ Expr.Var_ref v }
-	  | m = TEXMAP LSQUARE e = stage_expr RSQUARE
-					{ Expr.Texmap (m, e) }
-          | t = TEXCOORD		{ Expr.Texcoord t }
-	  | s = INDSCALE		{ Expr.Indscale s }
-	  | m = INDMTX			{ Expr.Indmtx m }
-	  | MINUS e = stage_expr	{ Expr.Neg e }
-	  | a = DESTVAR DOT c = CHANSELECT ASSIGN b = stage_expr
-					{ Expr.Assign (a, c, b) }
-	  | a = DESTVAR ASSIGN b = stage_expr
-					{ Expr.Assign (a,
-					    [| Expr.R; Expr.G; Expr.B;
-					       Expr.A |], b) }
-          | ITEXCOORD ASSIGN i = stage_expr
-					{ Expr.Assign (Expr.Itexc_dst,
-					    [| Expr.LS_S; Expr.LS_T |], i) }
-	  | ITEXCOORD			{ Expr.Itexcoord }
-	  | a = stage_expr EQ b = stage_expr
-					{ Expr.Ceq (a, b) }
-	  | a = stage_expr GT b = stage_expr
-					{ Expr.Cgt (a, b) }
-	  | a = stage_expr LT b = stage_expr
-					{ Expr.Clt (a, b) }
-	  | a = stage_expr QUESTIONMARK b = stage_expr COLON c = stage_expr
-					{ Expr.Ternary (a, b, c) }
-	  | CLAMP LPAREN c = stage_expr RPAREN
-					{ Expr.Clamp c }
-	  | MIX LPAREN a = stage_expr COMMA b = stage_expr COMMA
-	    c = stage_expr RPAREN
-					{ Expr.Mix (a, b, c) }
-	  | VEC3 LPAREN a = stage_expr COMMA b = stage_expr COMMA
-	    c = stage_expr RPAREN
-					{ Expr.Vec3 (a, b, c) }
-	  | c = D_INDMTX LPAREN e = stage_expr RPAREN
-					{ Expr.D_indmtx (c, e) }
-	  | e = stage_expr DOT c = CHANSELECT
-					{ Expr.Select (e, c) }
-	  | e = stage_expr LBRACE c = CHANSELECT RBRACE
-					{ Expr.Concat (e,
-					    Array.of_list (List.rev
-					      (Array.to_list c))) }
+stage_expr:
+	     a = VAR DOT c = CHANSELECT ASSIGN b = rhs_expr
+					 { Expr.Assign (Expr.destvar_of_var a,
+					     c, b) }
+	   | a = VAR ASSIGN b = rhs_expr
+					 { Expr.Assign (Expr.destvar_of_var a,
+					     [| Expr.R; Expr.G; Expr.B;
+						Expr.A |], b) }
+           | ITEXCOORD ASSIGN i = rhs_expr
+					 { Expr.Assign (Expr.Itexc_dst,
+					     [| Expr.LS_S; Expr.LS_T |], i) }
+;
+
+rhs_expr: n = INT			{ Expr.Int n }
+	| n = FLOAT			{ Expr.Float n }
+	| a = rhs_expr PLUS b = rhs_expr
+				      { Expr.Plus (a, b) }
+	| a = rhs_expr MINUS b = rhs_expr
+				      { Expr.Minus (a, b) }
+	| a = rhs_expr ACCUM b = rhs_expr
+				      { Expr.Accum (a, b) }
+	| a = rhs_expr DEACCUM b = rhs_expr
+				      { Expr.Deaccum (a, b) }
+	| a = rhs_expr MULT b = rhs_expr
+				      { Expr.Mult (a, b) }
+	| a = rhs_expr MATMUL b = rhs_expr
+				      { Expr.Matmul (a, b) }
+	| a = rhs_expr DIVIDE b = rhs_expr
+				      { Expr.Divide (a, b) }
+	| a = rhs_expr MODULUS b = rhs_expr
+				      { Expr.Modulus (a, b) }
+	| LPAREN e = rhs_expr RPAREN
+	  			      { e }
+	| v = VAR 			{ Expr.Var_ref v }
+	| m = TEXMAP LSQUARE e = rhs_expr RSQUARE
+				      { Expr.Texmap (m, e) }
+        | t = TEXCOORD		{ Expr.Texcoord t }
+	| s = INDSCALE		{ Expr.Indscale s }
+	| m = INDMTX			{ Expr.Indmtx m }
+	| MINUS e = rhs_expr	{ Expr.Neg e }
+	| ITEXCOORD			{ Expr.Itexcoord }
+	| a = rhs_expr EQ b = rhs_expr
+				      { Expr.Ceq (a, b) }
+	| a = rhs_expr GT b = rhs_expr
+				      { Expr.Cgt (a, b) }
+	| a = rhs_expr LT b = rhs_expr
+				      { Expr.Clt (a, b) }
+	| a = rhs_expr QUESTIONMARK b = rhs_expr COLON c = rhs_expr
+				      { Expr.Ternary (a, b, c) }
+	| CLAMP LPAREN c = rhs_expr RPAREN
+				      { Expr.Clamp c }
+	| MIX LPAREN a = rhs_expr COMMA b = rhs_expr COMMA
+	  c = rhs_expr RPAREN
+				      { Expr.Mix (a, b, c) }
+	| VEC3 LPAREN a = rhs_expr COMMA b = rhs_expr COMMA
+	  c = rhs_expr RPAREN
+				      { Expr.Vec3 (a, b, c) }
+	| c = D_INDMTX LPAREN e = rhs_expr RPAREN
+				      { Expr.D_indmtx (c, e) }
+	| e = rhs_expr DOT c = CHANSELECT
+				      { Expr.Select (e, c) }
+	| e = rhs_expr LBRACE c = CHANSELECT RBRACE
+				      { Expr.Concat (e,
+					  Array.of_list (List.rev
+					    (Array.to_list c))) }
 ;
 
 %%
