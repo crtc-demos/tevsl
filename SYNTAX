@@ -16,6 +16,8 @@ GX_TEVREG{0,1,2}	GX_CC_C{0,1,2} / GX_CC_A{0,1,2} / GX_CA_A{0,1,2}
 
 always written as "cr0", "cr1", "cr2", with lane selectors as appropriate.
 
+*** everything below here is nonsense! We need to re-spec colour0/alpha0/colour0a0 etc. instead!
+
 Colour setup		Alpha setup
 ------------		-----------
 GX_CC_RASC / GX_CC_RASA	GX_CA_RASA

@@ -18,8 +18,6 @@ let var = "tev"
 	| "cr0"
 	| "cr1"
 	| "cr2"
-	| "ras"
-	| "tex"
 	| "k0"
 	| "k1"
 	| "k2"
@@ -49,8 +47,6 @@ rule token = parse
 	| "cr0" -> Expr.CR 0
 	| "cr1" -> Expr.CR 1
 	| "cr2" -> Expr.CR 2
-	| "ras" -> Expr.Raster
-	| "tex" -> Expr.Texture
 	| "k0" -> Expr.K0
 	| "k1" -> Expr.K1
 	| "k2" -> Expr.K2
