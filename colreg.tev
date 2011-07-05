@@ -1,0 +1,11 @@
+stage 0:
+  tev.rgb = cr0.rgb;
+
+stage 1:
+  tev.rgb = cr1.a;
+
+stage 2:
+  tev.a = cr2.a;
+
+stage 3:
+  tev = cr1;

@@ -754,7 +754,8 @@ let int_valued_float x =
   let frac, _ = modf x in
   frac = 0.0
 
-(* Rewrite "tev.xxx" variables as cprev or aprev as appropriate to context.  *)
+(* Rewrite "tev.xxx" variables as cprev or aprev as appropriate to context.
+   Also rewrite cr0, cr1, cr2 as c0/a0/c1/a1/c2/a2 similarly.  *)
 
 let rec rewrite_tev_vars expr ~alpha =
   map_expr
@@ -769,6 +770,30 @@ let rec rewrite_tev_vars expr ~alpha =
         Var_ref Aprev
     | Select (Var_ref Tev, ([| A |] | [| _; _; _; A |])) when alpha ->
         Var_ref Aprev
+    | (Var_ref (CR n)
+       | Select (Var_ref (CR n), ([| R; G; B |] | [| R; G; B; _ |])))
+      when not alpha ->
+        begin match n with
+	  0 -> Var_ref C0
+	| 1 -> Var_ref C1
+	| 2 -> Var_ref C2
+	| _ -> failwith "Unexpected colour register"
+	end
+    | Select (Var_ref (CR n), ([| A |] | [| A; A; A; _ |])) when not alpha ->
+        begin match n with
+	  0 -> Var_ref A0
+	| 1 -> Var_ref A1
+	| 2 -> Var_ref A2
+	| _ -> failwith "Unexpected colour register"
+	end
+    | (Var_ref (CR n) | Select (Var_ref (CR n), ([| _; _; _; A |] | [| A |])))
+      when alpha ->
+        begin match n with
+	  0 -> Var_ref A0
+	| 1 -> Var_ref A1
+	| 2 -> Var_ref A2
+	| _ -> failwith "Unexpected colour register"
+	end
     | x -> x)
     expr
 
