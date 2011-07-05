@@ -168,7 +168,7 @@ let rewrite_const expr ~alpha =
   let expr' = scan expr in
   expr', !which_const
 
-exception Incompatible_swaps
+exception Incompatible_swaps of lane_select array * lane_select array
 
 let rewrite_swap_tables expr ~alpha =
   let texswap = ref None
@@ -176,11 +176,11 @@ let rewrite_swap_tables expr ~alpha =
   let set_tex t =
     match !texswap with
       None -> texswap := Some t
-    | Some o -> if o <> t then raise Incompatible_swaps in
+    | Some o -> if o <> t then raise (Incompatible_swaps (o, t)) in
   let set_ras r =
     match !rasswap with
       None -> rasswap := Some r
-    | Some o -> if o <> r then raise Incompatible_swaps in
+    | Some o -> if o <> r then raise (Incompatible_swaps (o, r)) in
   let default_cat_swap var = function
     [| R | G | B |] -> Concat (Var_ref var, [| R |])
   | [| _; _ |] -> Concat (Var_ref var, [| R; G |])
@@ -420,36 +420,18 @@ let rewrite_texmaps expr ~alpha =
     | Some (om, oc) ->
         if om <> m || oc <> c then
 	  raise Incompatible_texmaps in
-  let rec scan = function
-    Plus (a, b) -> Plus (scan a, scan b)
-  | Minus (a, b) -> Minus (scan a, scan b)
-  | Divide (a, b) -> Divide (scan a, scan b)
-  | Mult (a, b) -> Mult (scan a, scan b)
-  | Matmul (a, b) -> Matmul (scan a, scan b)
-  | Modulus (a, b) -> Modulus (scan a, scan b)
-  | Accum (a, b) -> Accum (scan a, scan b)
-  | Deaccum (a, b) -> Deaccum (scan a, scan b)
-  | Neg a -> Neg (scan a)
-  | Clamp a -> Clamp (scan a)
-  | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
-  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
-  | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
-  | Ceq (a, b) -> Ceq (scan a, scan b)
-  | Cgt (a, b) -> Cgt (scan a, scan b)
-  | Clt (a, b) -> Clt (scan a, scan b)
-  | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Var_ref x -> Var_ref x
+  let rec texmap_rewrite = function
+    Select (Texmap (m, Texcoord c), ([| A |] | [| A; A; A |]
+				     | [| A; A; A; _ |])) ->
+      set_texmap m c; Var_ref Texa
   | Texmap (m, Texcoord c) ->
       set_texmap m c; if alpha then Var_ref Texa else Var_ref Texc
   | Texmap (m, itc) ->
       let plain_texcoord, istuff = rewrite_indirect_texcoord itc in
       indirect_stuff := Some istuff;
-      scan (Texmap (m, Texcoord plain_texcoord))
-  | (Float _ | Int _ | Texcoord _ | Indmtx _ | D_indmtx _ | Indscale _
-     | Itexcoord as i) -> i
-  | Select (v, lx) -> Select (scan v, lx)
-  | Concat (x, lx) -> Concat (scan x, lx) in
-  let expr' = scan expr in
+      map_expr texmap_rewrite (Texmap (m, Texcoord plain_texcoord))
+  | x -> x in
+  let expr' = map_expr texmap_rewrite expr in
   expr', !texmap_texcoord, !indirect_stuff
 
 exception Incompatible_colour_channels
@@ -1091,7 +1073,16 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
   let expr, const_extr = rewrite_const expr ~alpha in
   let expr, texmap_texcoord, indtex = rewrite_texmaps expr ~alpha in
   let expr, colchan = rewrite_colchans expr ~alpha in
-  let expr, texswap, rasswap = rewrite_swap_tables expr ~alpha in
+  let expr, texswap, rasswap =
+    begin try
+      rewrite_swap_tables expr ~alpha
+    with Incompatible_swaps (x, y) ->
+      Printf.fprintf stderr "Incompatible swaps '.%s' and '.%s' at stage %d\n"
+        (string_of_laneselect x ~reverse:false)
+	(string_of_laneselect y ~reverse:false)
+	stage;
+      exit 1
+    end in
   let comm_variants = commutative_variants expr in
   let matched = List.fold_right
     (fun variant found ->
