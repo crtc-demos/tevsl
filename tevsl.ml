@@ -194,44 +194,22 @@ let rewrite_swap_tables expr ~alpha =
   | [| _; _; _; _ |] -> Var_ref var
   | [| A |] -> if alpha then Var_ref var else Select (Var_ref var, [| R |])
   | _ -> failwith "No default swap" in
-  let rec scan = function
-    Plus (a, b) -> Plus (scan a, scan b)
-  | Minus (a, b) -> Minus (scan a, scan b)
-  | Divide (a, b) -> Divide (scan a, scan b)
-  | Mult (a, b) -> Mult (scan a, scan b)
-  | Matmul (a, b) -> Matmul (scan a, scan b)
-  | Modulus (a, b) -> Modulus (scan a, scan b)
-  | Accum (a, b) -> Accum (scan a, scan b)
-  | Deaccum (a, b) -> Deaccum (scan a, scan b)
-  | Neg a -> Neg (scan a)
-  | Clamp a -> Clamp (scan a)
-  | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
-  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
-  | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
-  | Ceq (a, b) -> Ceq (scan a, scan b)
-  | Cgt (a, b) -> Cgt (scan a, scan b)
-  | Clt (a, b) -> Clt (scan a, scan b)
-  | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Texmap (m, c) -> Texmap (m, c)
-  | Float x -> Float x
-  | Int x -> Int x
-  | Concat (Var_ref Texc, lx) -> set_tex lx; default_cat_swap Texc lx
-  | Concat (Var_ref Texa, lx) -> set_tex lx; default_cat_swap Texa lx
-  | Concat (Var_ref Rasc, lx) -> set_ras lx; default_cat_swap Rasc lx
-  | Concat (Var_ref Rasa, lx) -> set_ras lx; default_cat_swap Rasa lx
-  | Select (Var_ref Texc, lx) -> set_tex lx; default_swap Texc lx
-  | Select (Var_ref Texa, lx) -> set_tex lx; default_swap Texa lx
-  | Select (Var_ref Rasc, lx) -> set_ras lx; default_swap Rasc lx
-  | Select (Var_ref Rasa, lx) -> set_ras lx; default_swap Rasa lx
-  | Var_ref Texc -> set_tex [| R; G; B; X |]; Var_ref Texc
-  | Var_ref Texa -> set_tex [| X; X; X; A |]; Var_ref Texa
-  | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
-  | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
-  | Var_ref x -> Var_ref x
-  | (Indmtx _ | D_indmtx _ | Indscale _ | Texcoord _ | Itexcoord as i) -> i
-  | Select (x, lx) -> Select (scan x, lx)
-  | Concat (x, lx) -> Concat (scan x, lx) in
-  let expr' = scan expr in
+  let expr' = map_expr
+    (function 
+      Concat (Var_ref Texc, lx) -> set_tex lx; default_cat_swap Texc lx
+    | Concat (Var_ref Texa, lx) -> set_tex lx; default_cat_swap Texa lx
+    | Concat (Var_ref Rasc, lx) -> set_ras lx; default_cat_swap Rasc lx
+    | Concat (Var_ref Rasa, lx) -> set_ras lx; default_cat_swap Rasa lx
+    | Select (Var_ref Texc, lx) -> set_tex lx; default_swap Texc lx
+    | Select (Var_ref Texa, lx) -> set_tex lx; default_swap Texa lx
+    | Select (Var_ref Rasc, lx) -> set_ras lx; default_swap Rasc lx
+    | Select (Var_ref Rasa, lx) -> set_ras lx; default_swap Rasa lx
+    | Var_ref Texc -> set_tex [| R; G; B; X |]; Var_ref Texc
+    | Var_ref Texa -> set_tex [| X; X; X; A |]; Var_ref Texa
+    | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
+    | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
+    | x -> x)
+    expr in
   expr', !texswap, !rasswap
 
 type texcoord = S | T | U
