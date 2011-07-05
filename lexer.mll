@@ -18,6 +18,8 @@ let var = "tev"
 	| "cr0"
 	| "cr1"
 	| "cr2"
+	| "ras"
+	| "tex"
 	| "k0"
 	| "k1"
 	| "k2"
@@ -31,10 +33,6 @@ let var = "tev"
 	| colour "zero"
 	| "alphabump"
 	| "alphabumpn"
-     (* | "texc"
-	| "texa"
-	| "rasc"
-	| "rasa" *)
 
 let destvar = "tevprev"
             | "tevreg0"
@@ -51,6 +49,8 @@ rule token = parse
 	| "cr0" -> Expr.CR 0
 	| "cr1" -> Expr.CR 1
 	| "cr2" -> Expr.CR 2
+	| "ras" -> Expr.Raster
+	| "tex" -> Expr.Texture
 	| "k0" -> Expr.K0
 	| "k1" -> Expr.K1
 	| "k2" -> Expr.K2
@@ -64,10 +64,6 @@ rule token = parse
 	| "colourzero" | "colorzero" -> Expr.ColourZero
 	| "alphabump" -> Expr.AlphaBump
 	| "alphabumpn" -> Expr.AlphaBumpN
-     (* | "texc" -> Expr.Texc
-	| "texa" -> Expr.Texa
-	| "rasc" -> Expr.Rasc
-	| "rasa" -> Expr.Rasa *)
 	| _ -> failwith "Bad variable" in
 	VAR vt
       }

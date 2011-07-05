@@ -44,16 +44,16 @@ stage_exprs: /* empty */		{ [] }
 ;
 
 stage_expr:
-	     a = VAR DOT c = CHANSELECT ASSIGN b = rhs_expr
-					 { Expr.Assign (Expr.destvar_of_var a,
-					     c, b) }
-	   | a = VAR ASSIGN b = rhs_expr
-					 { Expr.Assign (Expr.destvar_of_var a,
-					     [| Expr.R; Expr.G; Expr.B;
-						Expr.A |], b) }
-           | ITEXCOORD ASSIGN i = rhs_expr
-					 { Expr.Assign (Expr.Itexc_dst,
-					     [| Expr.LS_S; Expr.LS_T |], i) }
+	    a = VAR DOT c = CHANSELECT ASSIGN b = rhs_expr
+					{ Expr.Assign (Expr.destvar_of_var a,
+					    c, b) }
+	  | a = VAR ASSIGN b = rhs_expr
+					{ Expr.Assign (Expr.destvar_of_var a,
+					    [| Expr.R; Expr.G; Expr.B;
+					       Expr.A |], b) }
+          | ITEXCOORD ASSIGN i = rhs_expr
+					{ Expr.Assign (Expr.Itexc_dst,
+					    [| Expr.LS_S; Expr.LS_T |], i) }
 ;
 
 rhs_expr: n = INT			{ Expr.Int n }

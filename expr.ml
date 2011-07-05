@@ -42,6 +42,8 @@ and var_param =
   | A1
   | C2
   | A2
+  | Texture
+  | Raster
   | K0
   | K1
   | K2
