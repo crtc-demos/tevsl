@@ -94,7 +94,8 @@ let map_expr func expr =
     | Itexcoord -> Itexcoord
     | Int i -> Int i
     | Float f -> Float f
-    | Var_ref vp -> Var_ref vp in
+    | Var_ref vp -> Var_ref vp
+    | Protect e -> e in
   scan expr
 
 exception Too_many_constants
@@ -112,27 +113,11 @@ let rewrite_const expr ~alpha =
           raise Too_many_constants
 	else
 	  Var_ref Extracted_const in
-  let rec scan = function
-    Plus (a, b) -> Plus (scan a, scan b)
-  | Minus (a, b) -> Minus (scan a, scan b)
-  | Divide (a, b) -> Divide (scan a, scan b)
-  | Mult (Minus (Int 1l, a), b) ->
+  let rec rewrite_fn = function
+    Mult (Minus (Int 1l, a), b) ->
       (* Avoid rewriting the "1" in (1-x)*y -- hack!  *)
-      Mult (Minus (Int 1l, scan a), scan b)
-  | Mult (a, b) -> Mult (scan a, scan b)
-  | Modulus (a, b) -> Modulus (scan a, scan b)
-  | Matmul (a, b) -> Matmul (scan a, scan b)
-  | Accum (a, b) -> Accum (scan a, scan b)
-  | Deaccum (a, b) -> Deaccum (scan a, scan b)
-  | Neg a -> Neg (scan a)
-  | Clamp a -> Clamp (scan a)
-  | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
-  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
-  | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
-  | Ceq (a, b) -> Ceq (scan a, scan b)
-  | Cgt (a, b) -> Cgt (scan a, scan b)
-  | Clt (a, b) -> Clt (scan a, scan b)
-  | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
+      Protect (Mult (Minus (Int 1l, map_expr rewrite_fn a),
+		     map_expr rewrite_fn b))
   | Float 1.0 | Int 1l when alpha -> set_const KCSEL_1
   | Float 0.875 -> set_const KCSEL_7_8
   | Float 0.75 -> set_const KCSEL_3_4
@@ -161,53 +146,103 @@ let rewrite_const expr ~alpha =
   | Select (Var_ref K1, [| A |]) -> set_const KCSEL_K1_A
   | Select (Var_ref K2, [| A |]) -> set_const KCSEL_K2_A
   | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
-  | Concat (e, ls) -> Concat (scan e, ls)
-  | (Float _ | Int _ | Var_ref _ | Texmap _ | Indmtx _ | D_indmtx _
-     | Indscale _ | Texcoord _ | Itexcoord as i) -> i
-  | Select (a, la) -> Select (scan a, la) in
-  let expr' = scan expr in
+  | x -> x in
+  let expr' = map_expr rewrite_fn expr in
   expr', !which_const
+
+let swap_matches a b =
+  let min_length = min (Array.length a) (Array.length b) in
+  let matching = ref true in
+  for i = 0 to min_length - 1 do
+    match a.(i), b.(i) with
+      (R | G | B | A), X
+    | X, (R | G | B | A)
+    | X, X -> ()
+    | a, b when a = b -> ()
+    | _ -> matching := false
+  done;
+  !matching
 
 exception Incompatible_swaps of lane_select array * lane_select array
 
 let rewrite_swap_tables expr ~alpha =
+  let set_swizzle alphavar colourvar swiz t =
+    match !swiz with
+      None ->
+        swiz := Some t;
+	if alpha then
+	  alphavar
+	else begin
+	  match t with
+	    [| a; b; c; _ |] when a = b && a = c -> alphavar
+	  | [| _; _; _; _ |] -> colourvar
+	  | [| a; b; c |] when a = b && a = c -> alphavar
+	  | [| _; _; _ |] -> colourvar
+	  | [| a; b |] when a = b -> colourvar
+	  | [| _; _ |] -> colourvar
+	  | [| _ |] -> colourvar
+	  | _ -> failwith "Unexpected lanes"
+	end
+    | Some o ->
+        if alpha then begin
+	  if swap_matches o t then alphavar
+	  else raise (Incompatible_swaps (o, t))
+	end else begin
+	  match t, o with
+	    [| a; b; c |], [| d; e; f |] when a = b && a = c ->
+	      swiz := Some [| d; e; f; a |]; alphavar
+	  | [| a; b; c |], [| d; e; f |] when d = e && d = f ->
+	      swiz := Some [| a; b; c; d |]; colourvar
+	  | [| a; b; c; d |], [| e; f; g; h |] when a = b && a = c && a = d
+						    && a = h ->
+	      swiz := Some [| e; f; g; h |]; alphavar
+          | [| a; b; c; d |], [| e; f; g; h |] when e = f && e = g && e = h
+						    && e = d ->
+	      swiz := Some [| a; b; c; d |]; colourvar
+	  | x, y when swap_matches x y -> colourvar
+	  | x, y -> raise (Incompatible_swaps (x, y))
+	end in
   let texswap = ref None
   and rasswap = ref None in
-  let set_tex t =
-    match !texswap with
-      None -> texswap := Some t
-    | Some o -> if o <> t then raise (Incompatible_swaps (o, t)) in
-  let set_ras r =
-    match !rasswap with
-      None -> rasswap := Some r
-    | Some o -> if o <> r then raise (Incompatible_swaps (o, r)) in
+  let set_tex = set_swizzle Texa Texc texswap
+  and set_ras = set_swizzle Rasa Rasc rasswap in
   let default_cat_swap var = function
-    [| R | G | B |] -> Concat (Var_ref var, [| R |])
+    [| R | G | B |] -> if alpha then Concat (Var_ref var, [| X; X; X; A |])
+		       else Concat (Var_ref var, [| R |])
   | [| _; _ |] -> Concat (Var_ref var, [| R; G |])
   | [| _; _; _ |] -> Concat (Var_ref var, [| R; G; B |])
-  | [| A |] -> if alpha then Var_ref var else Concat (Var_ref var, [| R |])
+  | [| A |] ->
+      if alpha then
+        Concat (Var_ref var, [| X; X; X; A |])
+      else
+	Concat (Var_ref var, [| R |])
   | _ -> failwith "No default swap" in
-  let default_swap var = function
-    [| R | G | B |] -> if alpha then Var_ref var
-		       else Select (Var_ref var, [| R |])
+  let default_sel_swap var = function
+    [| _ |] -> if alpha then Select (Var_ref var, [| X; X; X; A |])
+	       else Select (Var_ref var, [| R |])
   | [| _; _; _ |] -> Var_ref var
   | [| _; _; _; _ |] -> Var_ref var
-  | [| A |] -> if alpha then Var_ref var else Select (Var_ref var, [| R |])
   | _ -> failwith "No default swap" in
   let expr' = map_expr
     (function 
-      Concat (Var_ref Texc, lx) -> set_tex lx; default_cat_swap Texc lx
-    | Concat (Var_ref Texa, lx) -> set_tex lx; default_cat_swap Texa lx
-    | Concat (Var_ref Rasc, lx) -> set_ras lx; default_cat_swap Rasc lx
-    | Concat (Var_ref Rasa, lx) -> set_ras lx; default_cat_swap Rasa lx
-    | Select (Var_ref Texc, lx) -> set_tex lx; default_swap Texc lx
-    | Select (Var_ref Texa, lx) -> set_tex lx; default_swap Texa lx
-    | Select (Var_ref Rasc, lx) -> set_ras lx; default_swap Rasc lx
-    | Select (Var_ref Rasa, lx) -> set_ras lx; default_swap Rasa lx
-    | Var_ref Texc -> set_tex [| R; G; B; X |]; Var_ref Texc
-    | Var_ref Texa -> set_tex [| X; X; X; A |]; Var_ref Texa
-    | Var_ref Rasc -> set_ras [| R; G; B; X |]; Var_ref Rasc
-    | Var_ref Rasa -> set_ras [| X; X; X; A |]; Var_ref Rasa
+      Concat (Var_ref Texture, lx) ->
+        let var = set_tex lx in default_cat_swap var lx
+    | Concat (Var_ref Rasc, lx) ->
+        let var = set_ras lx in default_cat_swap var lx
+    | Concat (Var_ref Rasa, lx) ->
+        let var = set_ras lx in default_cat_swap var lx
+    | Select (Var_ref Texture, lx) ->
+        let var = set_tex lx in default_sel_swap var lx
+    | Select (Var_ref Rasc, lx) ->
+        let var = set_ras lx in default_sel_swap var lx
+    | Select (Var_ref Rasa, lx) ->
+        let var = set_ras lx in default_sel_swap var lx
+    | Var_ref Texture ->
+        let var = set_tex [| R; G; B; X |] in Var_ref var
+    | Var_ref Rasc ->
+        let var = set_ras [| R; G; B; X |] in Var_ref var
+    | Var_ref Rasa ->
+        let var = set_ras [| X; X; X; A |] in Var_ref var
     | x -> x)
     expr in
   expr', !texswap, !rasswap
@@ -383,8 +418,15 @@ let rec rewrite_indirect_texcoord = function
       texcoord, ind_info
   | x -> raise (Unrecognized_indirect_texcoord_part ("indirect", x))
 
+exception Incompatible_indirect_parts
+
 let merge_indirect a b =
-  if a = b then a else failwith "Can't merge indirect parts"
+  match a, b with
+    None, None -> None
+  | Some a, None -> Some a
+  | None, Some b -> Some b
+  | Some a, Some b when a = b -> Some a
+  | _, _ -> raise Incompatible_indirect_parts
 
 exception Incompatible_texmaps
 exception Non_simple_texcoord
@@ -399,11 +441,14 @@ let rewrite_texmaps expr ~alpha =
         if om <> m || oc <> c then
 	  raise Incompatible_texmaps in
   let rec texmap_rewrite = function
-    Select (Texmap (m, Texcoord c), ([| A |] | [| A; A; A |]
-				     | [| A; A; A; _ |])) ->
-      set_texmap m c; Var_ref Texa
+    Select (Texmap (m, Texcoord c), [| A | R | G | B as lane |]) when alpha ->
+      set_texmap m c; Select (Var_ref Texture, [| X; X; X; lane |])
+  | Select (Texmap (m, Texcoord c), [| _; _; _; lane |]) when alpha ->
+      set_texmap m c; Select (Var_ref Texture, [| X; X; X; lane |])
+  | Select (Texmap (m, Texcoord c), lanes) when not alpha ->
+      set_texmap m c; Select (Var_ref Texture, lanes)
   | Texmap (m, Texcoord c) ->
-      set_texmap m c; if alpha then Var_ref Texa else Var_ref Texc
+      set_texmap m c; Var_ref Texture
   | Texmap (m, itc) ->
       let plain_texcoord, istuff = rewrite_indirect_texcoord itc in
       indirect_stuff := Some istuff;
@@ -422,42 +467,23 @@ let rewrite_colchans expr ~alpha =
     | Some oc ->
         if oc <> c then
 	  raise Incompatible_colour_channels in
-  let rec scan = function
-    Plus (a, b) -> Plus (scan a, scan b)
-  | Minus (a, b) -> Minus (scan a, scan b)
-  | Divide (a, b) -> Divide (scan a, scan b)
-  | Mult (a, b) -> Mult (scan a, scan b)
-  | Matmul (a, b) -> Matmul (scan a, scan b)
-  | Modulus (a, b) -> Modulus (scan a, scan b)
-  | Accum (a, b) -> Accum (scan a, scan b)
-  | Deaccum (a, b) -> Deaccum (scan a, scan b)
-  | Neg a -> Neg (scan a)
-  | Clamp a -> Clamp (scan a)
-  | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
-  | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
-  | Assign (dv, cs, e) -> Assign (dv, cs, scan e)
-  | Ceq (a, b) -> Ceq (scan a, scan b)
-  | Cgt (a, b) -> Cgt (scan a, scan b)
-  | Clt (a, b) -> Clt (scan a, scan b)
-  | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
-  | Var_ref Colour0 -> set_colchan Colour0; Var_ref Rasc
-  | Var_ref Alpha0 -> set_colchan Alpha0; Var_ref Rasa
-  | Var_ref Colour0A0 ->
-      set_colchan Colour0A0; if alpha then Var_ref Rasa else Var_ref Rasc
-  | Var_ref Colour1 -> set_colchan Colour1; Var_ref Rasc
-  | Var_ref Alpha1 -> set_colchan Alpha1; Var_ref Rasa
-  | Var_ref Colour1A1 ->
-      set_colchan Colour1A1; if alpha then Var_ref Rasa else Var_ref Rasc
-  | Var_ref ColourZero ->
-      set_colchan ColourZero; if alpha then Var_ref Rasa else Var_ref Rasc
-  | Var_ref AlphaBump -> set_colchan AlphaBump; Var_ref Rasa
-  | Var_ref AlphaBumpN ->
-      set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
-  | (Var_ref _ | Texmap _ | Float _ | Int _ | Indmtx _ | D_indmtx _
-     | Indscale _ | Texcoord _ | Itexcoord as i) -> i
-  | Select (v, lx) -> Select (scan v, lx)
-  | Concat (x, lx) -> Concat (scan x, lx) in
-  let expr' = scan expr in
+  let expr' = map_expr
+    (function
+      Var_ref Colour0 -> set_colchan Colour0; Var_ref Rasc
+    | Var_ref Alpha0 -> set_colchan Alpha0; Var_ref Rasa
+    | Var_ref Colour0A0 ->
+	set_colchan Colour0A0; if alpha then Var_ref Rasa else Var_ref Rasc
+    | Var_ref Colour1 -> set_colchan Colour1; Var_ref Rasc
+    | Var_ref Alpha1 -> set_colchan Alpha1; Var_ref Rasa
+    | Var_ref Colour1A1 ->
+	set_colchan Colour1A1; if alpha then Var_ref Rasa else Var_ref Rasc
+    | Var_ref ColourZero ->
+	set_colchan ColourZero; if alpha then Var_ref Rasa else Var_ref Rasc
+    | Var_ref AlphaBump -> set_colchan AlphaBump; Var_ref Rasa
+    | Var_ref AlphaBumpN ->
+	set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
+    | x -> x)
+    expr in
   expr', !colchan
 
 exception Unmatched_expr
@@ -760,37 +786,16 @@ let rec rewrite_tev_vars expr ~alpha =
 (* Rewrite "/ 2" as "* 0.5", integer-valued floats as ints, and rationals as
    floats.  *)
 
-let rec rewrite_rationals = function
-    Plus (a, b) -> Plus (rewrite_rationals a, rewrite_rationals b)
-  | Minus (a, b) -> Minus (rewrite_rationals a, rewrite_rationals b)
-  | Divide (Float a, Float b) -> Float (a /. b)
+let rewrite_rationals expr =
+  let rec rewrite_fn = function
+    Divide (Float a, Float b) -> Float (a /. b)
   | Divide (Int a, Int b) -> Float (Int32.to_float a /. Int32.to_float b)
   | Divide (Float a, Int b) -> Float (a /. Int32.to_float b)
   | Divide (Int a, Float b) -> Float (Int32.to_float a /. b)
-  | Divide (a, (Int 2l | Float 2.0)) -> Mult (rewrite_rationals a, Float 0.5)
-  | Divide (a, b) -> Divide (rewrite_rationals a, rewrite_rationals b)
-  | Mult (a, b) -> Mult (rewrite_rationals a, rewrite_rationals b)
-  | Matmul (a, b) -> Matmul (rewrite_rationals a, rewrite_rationals b)
-  | Modulus (a, b) -> Modulus (rewrite_rationals a, rewrite_rationals b)
-  | Accum (a, b) -> Accum (rewrite_rationals a, rewrite_rationals b)
-  | Deaccum (a, b) -> Deaccum (rewrite_rationals a, rewrite_rationals b)
-  | Neg a -> Neg (rewrite_rationals a)
-  | Clamp a -> Clamp (rewrite_rationals a)
-  | Mix (a, b, c) -> Mix (rewrite_rationals a, rewrite_rationals b,
-			  rewrite_rationals c)
-  | Vec3 (a, b, c) -> Vec3 (rewrite_rationals a, rewrite_rationals b,
-			    rewrite_rationals c)
-  | Assign (dv, cs, e) -> Assign (dv, cs, rewrite_rationals e)
-  | Ceq (a, b) -> Ceq (rewrite_rationals a, rewrite_rationals b)
-  | Cgt (a, b) -> Cgt (rewrite_rationals a, rewrite_rationals b)
-  | Clt (a, b) -> Clt (rewrite_rationals a, rewrite_rationals b)
-  | Ternary (a, b, c) -> Ternary (rewrite_rationals a, rewrite_rationals b,
-				  rewrite_rationals c)
+  | Divide (a, (Int 2l | Float 2.0)) -> Mult (map_expr rewrite_fn a, Float 0.5)
   | Float x when int_valued_float x -> Int (Int32.of_float x)
-  | (Float _ | Int _ | Var_ref _ | Texmap _ | Texcoord _ | Indmtx _
-     | D_indmtx _ | Indscale _ | Itexcoord as i) -> i
-  | Select (x, lx) -> Select (rewrite_rationals x, lx)
-  | Concat (x, lx) -> Concat (rewrite_rationals x, lx)
+  | x -> x in
+  map_expr rewrite_fn expr
 
 (* FIXME: The "D" input has more significant bits than the A, B and C inputs:
    10-bit signed versus 8-bit unsigned.  This rewriting function doesn't really
@@ -854,6 +859,12 @@ let rec rewrite_expr = function
       Mult (Plus (Minus (d, Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
 		  tevbias),
 	    Int 1l)
+  | Plus (Var_ref d, Mult (Var_ref x, Var_ref y)) ->
+      Mult (Plus (Plus (Var_ref d, Plus (Mult (Minus (Int 1l, Var_ref x),
+					       Int 0l),
+					 Mult (Var_ref x, Var_ref y))),
+		  Int 0l),
+	    Int 1l)
   | Mult (Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b)),
           tevscale) when c = c2 ->
       Mult (Plus (Plus (Int 0l,
@@ -892,6 +903,8 @@ let string_of_var_param = function
   | Texa -> "texa"
   | Rasc -> "rasc"
   | Rasa -> "rasa"
+  | Texture -> "texture"
+  | Raster -> "raster"
   | Extracted_const -> "extracted_const"
 
 let string_of_laneselect lsa ~reverse =
@@ -985,7 +998,11 @@ let string_of_expression expr =
       scan e;
       Buffer.add_char b ')'
   | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s)
-  | Itexcoord -> Buffer.add_string b "itexcoord" in
+  | Itexcoord -> Buffer.add_string b "itexcoord"
+  | Protect e ->
+      Buffer.add_string b "protect(";
+      scan e;
+      Buffer.add_char b ')' in
   scan expr;
   Buffer.contents b
 
@@ -1049,7 +1066,11 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
   let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
   let expr, const_extr = rewrite_const expr ~alpha in
+  (*Printf.printf "stage %d, after rewrite_const: %s\n" stage
+		(string_of_expression expr);*)
   let expr, texmap_texcoord, indtex = rewrite_texmaps expr ~alpha in
+  (*Printf.printf "stage %d, after rewrite_texmaps: %s\n" stage
+		(string_of_expression expr);*)
   let expr, colchan = rewrite_colchans expr ~alpha in
   let expr, texswap, rasswap =
     begin try
@@ -1241,19 +1262,6 @@ let merge_swaps a b =
       | a, b when a = b -> a
       | _, _ -> raise Swizzle_collision)
 
-let swap_matches a b =
-  let min_length = min (Array.length a) (Array.length b) in
-  let matching = ref true in
-  for i = 0 to min_length - 1 do
-    match a.(i), b.(i) with
-      (R | G | B | A), X
-    | X, (R | G | B | A)
-    | X, X -> ()
-    | a, b when a = b -> ()
-    | _ -> matching := false
-  done;
-  !matching
-
 exception Swap_substitution_failed
 
 (* Does this greedy algorithm lead to non-optimal results in some
@@ -1340,14 +1348,14 @@ let add_if_different l ls =
   else
     l :: ls
 
-let check_ind_part ipo ind =
+(*let check_ind_part ipo ind =
   match ipo with
     None -> ()
   | Some cp ->
       begin match cp.indirect with
 	None -> ()
       | Some ci -> ignore (merge_indirect ci ind)
-      end
+      end*)
 
 let gather_indirect_lookups stage_arr =
   let ind_luts = ref [] in
@@ -1380,8 +1388,8 @@ let gather_indirect_lookups stage_arr =
     begin match stage_arr.(i).ind_texc_part with
       None -> ()
     | Some ind ->
-	check_ind_part stage_arr.(i).colour_part ind;
-	check_ind_part stage_arr.(i).alpha_part ind;
+	(*check_ind_part stage_arr.(i).colour_part ind;
+	check_ind_part stage_arr.(i).alpha_part ind;*)
 	ind_luts := add_if_different (ind.ind_texmap, ind.ind_texcoord)
 				     !ind_luts
     end

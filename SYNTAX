@@ -37,3 +37,18 @@ Colour setup		Alpha setup
 GX_CC_TEXC / GX_CC_TEXA	GX_CA_TEXA
 
 always written as "tex", with selectors. These can use swap tables (swizzles).
+
+Swizzles
+--------
+
+For colour channels:
+
+texmapN[texcoordM].rgb must use texc with [RGBX] swap table.
+texmapN[texcoordM].aaa can use texa with [XXXA] swap table or texc with [AAAX] swap table.
+
+We can refer to texmapN[texcoordM].rrr as texa with [XXXR]. Colour channel could then be e.g. texmapN[texcoordM].agb using texc with [AGBX].
+
+For alpha channel:
+
+texmapN[texcoordM].r must use texa with [XXXR] swap table (similar for G, B).
+texmapN[texcoordM].a must use texa with [XXXA] swap table.

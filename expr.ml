@@ -27,6 +27,7 @@ type expr =
   | Indmtx of ind_matrix
   | D_indmtx of dyn_ind_matrix * expr
   | Itexcoord
+  | Protect of expr  (* Don't map child expr in map_expr.  *)
 
 (* X for "don't care".  *)
 and lane_select = R | G | B | A | LS_S | LS_T | X
@@ -55,6 +56,8 @@ and var_param =
   | ColourZero
   | AlphaBump
   | AlphaBumpN
+  | Texture
+  | Raster
   | Texc
   | Texa
   | Rasc
