@@ -218,7 +218,8 @@ let rewrite_swap_tables expr swizzles ~alpha =
       match swaps, lanes with
         [| r1; _; _; _ |], [| r2 |] when r1 = r2 ->
           Select (Var_ref cvar, [| r1 |])
-      | [| _; _; _; sa |], [| r; g; b; _ |] when sa = r && r = g && r = b ->
+      | [| _; _; _; sa |], ([| r; g; b |] | [| r; g; b; _ |])
+        when sa = r && r = g && r = b ->
 	  Var_ref avar
       | swaps, lanes when swap_matches swaps lanes -> Var_ref cvar
       | _ -> raise (Incompatible_swaps (swaps, lanes))
@@ -252,9 +253,9 @@ let find_swizzles expr ~alpha =
     (fun node ->
       match node with
 	Concat (Var_ref Texture, lx)
-      | Select (Var_ref Texture, lx) -> tex_swiz lx; node
+      | Select (Var_ref Texture, lx) -> tex_swiz lx; Protect node
       | Concat (Var_ref Raster, lx)
-      | Select (Var_ref Raster, lx) -> ras_swiz lx; node
+      | Select (Var_ref Raster, lx) -> ras_swiz lx; Protect node
       | Var_ref Texture -> tex_swiz [| R; G; B; A |]; node
       | Var_ref Raster -> ras_swiz [| R; G; B; A |]; node
       | _ -> node)
@@ -1070,7 +1071,8 @@ let print_num_channels oc colchans texchans =
   Printf.fprintf oc "GX_SetNumTexGens (%d);\n" texchans'
 
 let swizzle_for_expr orig_expr ~alpha =
-  let texswaps, rasswaps = find_swizzles orig_expr ~alpha in
+  let expr, _, _ = rewrite_texmaps orig_expr ~alpha in
+  let texswaps, rasswaps = find_swizzles expr ~alpha in
   { tex_swaps = texswaps; ras_swaps = rasswaps }
 
 (* A pre-pass to gather swizzles.  We can't resolve these with purely local
