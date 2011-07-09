@@ -163,89 +163,103 @@ let swap_matches a b =
   done;
   !matching
 
+let set_swap_don't_cares sel ~alpha =
+  match sel with
+    [| a |] -> if alpha then [| X; X; X; a |] else [| a; X; X; X |]
+  | [| a; b |] -> [| a; b; X; X |]
+  | [| a; b; c |] -> [| a; b; c; X |]
+  | [| a; b; c; d |] -> [| a; b; c; d |]
+  | _ -> failwith "Unexpected swizzles"
+
+type swizzle_info = {
+  tex_swaps : lane_select array list;
+  ras_swaps : lane_select array list
+}
+
+type swizzle_col_alpha_parts = {
+  mutable colour_swaps : swizzle_info option;
+  mutable alpha_swaps : swizzle_info option;
+  mutable merged_tex_swaps : lane_select array option;
+  mutable merged_ras_swaps : lane_select array option
+}
+
 exception Incompatible_swaps of lane_select array * lane_select array
 
-let rewrite_swap_tables expr ~alpha =
-  let set_swizzle alphavar colourvar swiz t =
-    match !swiz with
-      None ->
-        swiz := Some t;
-	if alpha then
-	  alphavar
-	else begin
-	  match t with
-	    [| a; b; c; _ |] when a = b && a = c -> alphavar
-	  | [| _; _; _; _ |] -> colourvar
-	  | [| a; b; c |] when a = b && a = c -> alphavar
-	  | [| _; _; _ |] -> colourvar
-	  | [| a; b |] when a = b -> colourvar
-	  | [| _; _ |] -> colourvar
-	  | [| _ |] -> colourvar
-	  | _ -> failwith "Unexpected lanes"
-	end
-    | Some o ->
-        if alpha then begin
-	  if swap_matches o t then alphavar
-	  else raise (Incompatible_swaps (o, t))
-	end else begin
-	  match t, o with
-	    [| a; b; c |], [| d; e; f |] when a = b && a = c ->
-	      swiz := Some [| d; e; f; a |]; alphavar
-	  | [| a; b; c |], [| d; e; f |] when d = e && d = f ->
-	      swiz := Some [| a; b; c; d |]; colourvar
-	  | [| a; b; c; d |], [| e; f; g; h |] when a = b && a = c && a = d
-						    && a = h ->
-	      swiz := Some [| e; f; g; h |]; alphavar
-          | [| a; b; c; d |], [| e; f; g; h |] when e = f && e = g && e = h
-						    && e = d ->
-	      swiz := Some [| a; b; c; d |]; colourvar
-	  | x, y when swap_matches x y -> colourvar
-	  | x, y -> raise (Incompatible_swaps (x, y))
-	end in
-  let texswap = ref None
-  and rasswap = ref None in
-  let set_tex = set_swizzle Texa Texc texswap
-  and set_ras = set_swizzle Rasa Rasc rasswap in
-  let default_cat_swap var = function
-    [| R | G | B |] -> if alpha then Concat (Var_ref var, [| X; X; X; A |])
-		       else Concat (Var_ref var, [| R |])
-  | [| _; _ |] -> Concat (Var_ref var, [| R; G |])
-  | [| _; _; _ |] -> Concat (Var_ref var, [| R; G; B |])
-  | [| A |] ->
-      if alpha then
-        Concat (Var_ref var, [| X; X; X; A |])
-      else
-	Concat (Var_ref var, [| R |])
-  | _ -> failwith "No default swap" in
-  let default_sel_swap var = function
-    [| _ |] -> if alpha then Select (Var_ref var, [| X; X; X; A |])
-	       else Select (Var_ref var, [| R |])
-  | [| _; _; _ |] -> Var_ref var
-  | [| _; _; _; _ |] -> Var_ref var
-  | _ -> failwith "No default swap" in
-  let expr' = map_expr
+let rewrite_swap_tables expr swizzles ~alpha =
+  let select_cat_var avar cvar swaps lanes =
+    let swaps = match swaps with
+      Some s -> s
+    | None -> failwith "Missing swizzles" in
+    if alpha then begin
+      match swaps, lanes with
+	[| r1; _; _; _ |], ([| r2 |] | [| _; _; _; r2 |]) when r1 = r2 ->
+          Concat (Var_ref avar, [| X; X; X; A |])
+      | _ -> raise (Incompatible_swaps (swaps, lanes))
+    end else begin
+      match swaps, lanes with
+	[| r1; _; _; _ |], [| r2 |] when r1 = r2 ->
+          Concat (Var_ref cvar, [| R |])
+      | [| r1; g1; _; _ |], [| r2; g2 |] when r1 = r2 && g1 = g2 ->
+          Concat (Var_ref cvar, [| R; G |])
+      | [| r1; g1; b1; _ |], [| r2; g2; b2 |] when r1 = r2 && g1 = g2
+						   && b1 == b2 ->
+          Concat (Var_ref cvar, [| R; G; B |])
+      | _ -> raise (Incompatible_swaps (swaps, lanes))
+    end in
+  let select_sel_var avar cvar swaps lanes =
+    let swaps = match swaps with
+      Some s -> s
+    | None -> failwith "Missing swizzles" in
+    if alpha then begin
+      match swaps, set_swap_don't_cares lanes ~alpha with
+        [| _; _; _; sa |], [| _; _; _; la |] when sa = la -> Var_ref avar
+      | _ -> raise (Incompatible_swaps (swaps, lanes))
+    end else begin
+      match swaps, lanes with
+        [| r1; _; _; _ |], [| r2 |] when r1 = r2 ->
+          Select (Var_ref cvar, [| r1 |])
+      | [| _; _; _; sa |], [| r; g; b; _ |] when sa = r && r = g && r = b ->
+	  Var_ref avar
+      | swaps, lanes when swap_matches swaps lanes -> Var_ref cvar
+      | _ -> raise (Incompatible_swaps (swaps, lanes))
+    end in
+  map_expr
     (function 
       Concat (Var_ref Texture, lx) ->
-        let var = set_tex lx in default_cat_swap var lx
-    | Concat (Var_ref Rasc, lx) ->
-        let var = set_ras lx in default_cat_swap var lx
-    | Concat (Var_ref Rasa, lx) ->
-        let var = set_ras lx in default_cat_swap var lx
+	select_cat_var Texa Texc swizzles.merged_tex_swaps lx
+    | Concat (Var_ref Raster, lx) ->
+	select_cat_var Rasa Rasc swizzles.merged_ras_swaps lx
     | Select (Var_ref Texture, lx) ->
-        let var = set_tex lx in default_sel_swap var lx
-    | Select (Var_ref Rasc, lx) ->
-        let var = set_ras lx in default_sel_swap var lx
-    | Select (Var_ref Rasa, lx) ->
-        let var = set_ras lx in default_sel_swap var lx
+	select_sel_var Texa Texc swizzles.merged_tex_swaps lx
+    | Select (Var_ref Raster, lx) ->
+	select_sel_var Rasa Rasc swizzles.merged_ras_swaps lx
     | Var_ref Texture ->
-        let var = set_tex [| R; G; B; X |] in Var_ref var
-    | Var_ref Rasc ->
-        let var = set_ras [| R; G; B; X |] in Var_ref var
-    | Var_ref Rasa ->
-        let var = set_ras [| X; X; X; A |] in Var_ref var
+	select_sel_var Texa Texc swizzles.merged_tex_swaps [| R; G; B; A |]
+    | Var_ref Raster ->
+	select_sel_var Rasa Rasc swizzles.merged_ras_swaps [| R; G; B; A |]
     | x -> x)
-    expr in
-  expr', !texswap, !rasswap
+    expr
+
+let find_swizzles expr ~alpha =
+  let record_swizzle swiz t =
+    let t' = set_swap_don't_cares t ~alpha in
+    swiz := t' :: !swiz in
+  let texswaps = ref []
+  and rasswaps = ref [] in
+  let tex_swiz = record_swizzle texswaps
+  and ras_swiz = record_swizzle rasswaps in
+  ignore (map_expr
+    (fun node ->
+      match node with
+	Concat (Var_ref Texture, lx)
+      | Select (Var_ref Texture, lx) -> tex_swiz lx; node
+      | Concat (Var_ref Raster, lx)
+      | Select (Var_ref Raster, lx) -> ras_swiz lx; node
+      | Var_ref Texture -> tex_swiz [| R; G; B; A |]; node
+      | Var_ref Raster -> ras_swiz [| R; G; B; A |]; node
+      | _ -> node)
+    expr);
+  !texswaps, !rasswaps
 
 type texcoord = S | T | U
 
@@ -1011,9 +1025,7 @@ type 'ac stage_info = {
   const_usage : const_setting option;
   texmap_texc : (int * int) option;
   indirect : indirect_info option;
-  colchan: var_param option;
-  tex_swaps : lane_select array option;
-  ras_swaps : lane_select array option
+  colchan: var_param option
 }
 
 (* Direct texmap & texcoord used by indirect "texcoord-only" operations: some
@@ -1030,8 +1042,6 @@ type stage_col_alpha_parts = {
   mutable ind_direct_tex_part : tex_info option;
   mutable colour_part : cvar_setting stage_info option;
   mutable alpha_part : avar_setting stage_info option;
-  mutable merged_tex_swaps : lane_select array option;
-  mutable merged_ras_swaps : lane_select array option
 }
 
 let parse_channel c =
@@ -1059,9 +1069,45 @@ let print_num_channels oc colchans texchans =
   Printf.fprintf oc "GX_SetNumChans (%d);\n" colchans';
   Printf.fprintf oc "GX_SetNumTexGens (%d);\n" texchans'
 
-exception Cant_match_stage of int
+let swizzle_for_expr orig_expr ~alpha =
+  let texswaps, rasswaps = find_swizzles orig_expr ~alpha in
+  { tex_swaps = texswaps; ras_swaps = rasswaps }
 
-let compile_expr stage orig_expr ~alpha ac_var_of_expr =
+(* A pre-pass to gather swizzles.  We can't resolve these with purely local
+   information, e.g. per-expression.  We need to do it using all the information
+   from a stage at a time.  *)
+
+let array_of_swizzles stage_defs ns =
+  let arr = Array.init ns
+    (fun _ -> { colour_swaps = None; alpha_swaps = None;
+		merged_tex_swaps = None; merged_ras_swaps = None }) in
+  List.iter
+    (fun (sn, stage_exprs) ->
+      Printf.printf "Array of swizzles: stage %d\n" sn;
+      List.iter
+        (fun stage_expr ->
+	  let stage_expr = default_assign stage_expr in
+            match stage_expr with
+	      Assign (_, [| A |], _) ->
+	        let swiz = swizzle_for_expr stage_expr ~alpha:true in
+		arr.(sn).alpha_swaps <- Some swiz
+	    | Assign (_, [| R; G; B |], _) ->
+	        let swiz = swizzle_for_expr stage_expr ~alpha:false in
+		arr.(sn).colour_swaps <- Some swiz
+	    | Assign (_, [| R; G; B; A |], _) ->
+	        let cswiz = swizzle_for_expr stage_expr ~alpha:false
+		and aswiz = swizzle_for_expr stage_expr ~alpha:true in
+		arr.(sn).alpha_swaps <- Some aswiz;
+		arr.(sn).colour_swaps <- Some cswiz
+	    | Assign (Itexc_dst, [| LS_S; LS_T |], e) -> ()
+	    | _ -> failwith "Bad stage expression")
+	stage_exprs)
+    stage_defs;
+  arr
+
+exception Can't_match_stage of int
+
+let compile_expr stage orig_expr swiz ~alpha ac_var_of_expr =
   let expr = rewrite_tev_vars orig_expr ~alpha in
   let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
@@ -1072,16 +1118,7 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
   (*Printf.printf "stage %d, after rewrite_texmaps: %s\n" stage
 		(string_of_expression expr);*)
   let expr, colchan = rewrite_colchans expr ~alpha in
-  let expr, texswap, rasswap =
-    begin try
-      rewrite_swap_tables expr ~alpha
-    with Incompatible_swaps (x, y) ->
-      Printf.fprintf stderr "Incompatible swaps '.%s' and '.%s' at stage %d\n"
-        (string_of_laneselect x ~reverse:false)
-	(string_of_laneselect y ~reverse:false)
-	stage;
-      exit 1
-    end in
+  let expr = rewrite_swap_tables expr swiz ~alpha in
   let comm_variants = commutative_variants expr in
   let matched = List.fold_right
     (fun variant found ->
@@ -1107,16 +1144,14 @@ let compile_expr stage orig_expr ~alpha ac_var_of_expr =
 	const_usage = const_extr;
 	texmap_texc = texmap_texcoord;
 	indirect = indtex;
-	colchan = colchan;
-	tex_swaps = texswap;
-	ras_swaps = rasswap
+	colchan = colchan
       }
   | None ->
       Printf.fprintf stderr "Attempting to match: '%s'\n"
 		     (string_of_expression expr);
       Printf.fprintf stderr "Rewritten from original: '%s'\n"
 		     (string_of_expression orig_expr);
-      raise (Cant_match_stage stage)
+      raise (Can't_match_stage stage)
 
 let combine_tev_orders col_order alpha_order =
   let combined_colchan =
@@ -1141,13 +1176,12 @@ let combine_tev_orders col_order alpha_order =
     | _ -> failwith "Invalid texmap/texcoord combination" in
   combined_texmap, combined_colchan
 
-let array_of_stages stage_defs ns =
+let array_of_stages stage_defs swiz_arr ns =
   let arr =
     Array.init ns
       (fun _ ->
         { ind_texc_part = None; ind_direct_tex_part = None; colour_part = None;
-	  alpha_part = None; merged_tex_swaps = None;
-	  merged_ras_swaps = None }) in
+	  alpha_part = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
       try
@@ -1157,17 +1191,21 @@ let array_of_stages stage_defs ns =
             match stage_expr with
 	      Assign (_, [| A |], _) ->
 		let comp =
-		  compile_expr sn stage_expr ~alpha:true avar_of_expr in
+		  compile_expr sn stage_expr swiz_arr.(sn) ~alpha:true
+			       avar_of_expr in
 		arr.(sn).alpha_part <- Some comp
 	    | Assign (_, [| R; G; B |], _) ->
 		let comp =
-		  compile_expr sn stage_expr ~alpha:false cvar_of_expr in
+		  compile_expr sn stage_expr swiz_arr.(sn) ~alpha:false
+			       cvar_of_expr in
 		arr.(sn).colour_part <- Some comp
 	    | Assign (_, [| R; G; B; A |], _) ->
 		(* Not entirely sure if it's sensible to allow this.  *)
-		let ccomp = compile_expr sn stage_expr ~alpha:false cvar_of_expr
+		let ccomp = compile_expr sn stage_expr swiz_arr.(sn)
+					 ~alpha:false cvar_of_expr
 		and acomp =
-		  compile_expr sn stage_expr ~alpha:true avar_of_expr in
+		  compile_expr sn stage_expr swiz_arr.(sn) ~alpha:true
+			       avar_of_expr in
 		arr.(sn).alpha_part <- Some acomp;
 		arr.(sn).colour_part <- Some ccomp
 	    | Assign (Itexc_dst, [| LS_S; LS_T |], e) ->
@@ -1242,14 +1280,6 @@ let print_swaps oc snum t_or_r lsa =
   Printf.fprintf oc "stage %d: %s swaps: %s\n" snum t_or_r
 		 (string_of_laneselect lsa ~reverse:false)
 
-let set_swap_don't_cares sel ~alpha =
-  match sel with
-    [| a |] -> if alpha then [| X; X; X; a |] else [| a; X; X; X |]
-  | [| a; b |] -> [| a; b; X; X |]
-  | [| a; b; c |] -> [| a; b; c; X |]
-  | [| a; b; c; d |] -> [| a; b; c; d |]
-  | _ -> failwith "Unexpected swizzles"
-
 exception Swizzle_collision
 
 let merge_swaps a b =
@@ -1261,6 +1291,22 @@ let merge_swaps a b =
       | X, X -> X
       | a, b when a = b -> a
       | _, _ -> raise Swizzle_collision)
+
+let merge_swap_list swaplist =
+  List.fold_right
+    (fun this merged ->
+      try
+        merge_swaps this merged
+      with Swizzle_collision as e ->
+        (* Element-wise merge failed.  Try to use alpha channel.  *)
+	match this, merged with
+	  [| r1; g1; b1; X |], [| r2; g2; b2; X |] when r1 = g1 && r1 = b1 ->
+	    [| r2; g2; b2; r1 |]
+	| [| r1; g1; b1; X |], [| r2; g2; b2; X |] when r2 = g2 && r2 = b2 ->
+	    [| r1; g1; b1; r2 |]
+	| _ -> raise e)
+    swaplist
+    [| X; X; X; X |]
 
 exception Swap_substitution_failed
 
@@ -1282,63 +1328,36 @@ let unique_swaps swaps unique_list =
   end else
     swaps :: unique_list
 
-let gather_swap_tables stage_def_arr =
+let gather_swap_tables swizzle_arr =
   let swap_tables = ref [] in
-  for i = 0 to Array.length stage_def_arr - 1 do
-    let cpart = stage_def_arr.(i).colour_part
-    and apart = stage_def_arr.(i).alpha_part in
+  for i = 0 to Array.length swizzle_arr - 1 do
+    let cpart = swizzle_arr.(i).colour_swaps
+    and apart = swizzle_arr.(i).alpha_swaps in
     let texswaps, rasswaps =
       match cpart, apart with
 	Some cpart, Some apart ->
-          let texswaps =
-	    match cpart.tex_swaps, apart.tex_swaps with
-	      Some c_texswaps, Some a_texswaps ->
-		merge_swaps (set_swap_don't_cares c_texswaps ~alpha:false)
-			    (set_swap_don't_cares a_texswaps ~alpha:true)
-	    | Some c_texswaps, None ->
-	        set_swap_don't_cares c_texswaps ~alpha:false
-	    | None, Some a_texswaps ->
-	        set_swap_don't_cares a_texswaps ~alpha:true
-	    | None, None -> [| X; X; X; X |]
-	  and rasswaps =
-	    match cpart.ras_swaps, apart.ras_swaps with
-	      Some c_rasswaps, Some a_rasswaps ->
-		merge_swaps (set_swap_don't_cares c_rasswaps ~alpha:false)
-			    (set_swap_don't_cares a_rasswaps ~alpha:true)
-	    | Some c_rasswaps, None ->
-	        set_swap_don't_cares c_rasswaps ~alpha:false
-	    | None, Some a_rasswaps ->
-	        set_swap_don't_cares a_rasswaps ~alpha:true
-	    | None, None -> [| X; X; X; X |] in
+	  (* Note: merge alpha before colour, because it's more highly
+	     constrained: e.g colour part can use either TEXA or TEXC, but alpha
+	     can only use TEXA.  *)
+          let texswaps = merge_swap_list (apart.tex_swaps @ cpart.tex_swaps)
+	  and rasswaps = merge_swap_list (apart.ras_swaps @ cpart.ras_swaps) in
 	  texswaps, rasswaps
       | Some cpart, None ->
-          let texswaps =
-	    match cpart.tex_swaps with
-	      Some c_texswaps -> set_swap_don't_cares c_texswaps ~alpha:false
-	    | None -> [| X; X; X; X |]
-          and rasswaps =
-	    match cpart.ras_swaps with
-	      Some c_rasswaps -> set_swap_don't_cares c_rasswaps ~alpha:false
-	    | None -> [| X; X; X; X |] in
+          let texswaps = merge_swap_list cpart.tex_swaps
+	  and rasswaps = merge_swap_list cpart.ras_swaps in
 	  texswaps, rasswaps
       | None, Some apart ->
-          let texswaps =
-	    match apart.tex_swaps with
-	      Some a_texswaps -> set_swap_don't_cares a_texswaps ~alpha:true
-	    | None -> [| X; X; X; X |]
-          and rasswaps =
-	    match apart.ras_swaps with
-	      Some a_rasswaps -> set_swap_don't_cares a_rasswaps ~alpha:true
-	    | None -> [| X; X; X; X |] in
+          let texswaps = merge_swap_list apart.tex_swaps
+	  and rasswaps = merge_swap_list apart.ras_swaps in
 	  texswaps, rasswaps
        | None, None ->
-           [| X; X; X; X |], [| X; X; X; X |] in
-    (* print_swaps stderr i "texture" texswaps;
-    print_swaps stderr i "raster" rasswaps; *)
+          [| X; X; X; X |], [| X; X; X; X |] in
+    print_swaps stderr i "texture" texswaps;
+    print_swaps stderr i "raster" rasswaps;
     swap_tables := unique_swaps texswaps !swap_tables;
     swap_tables := unique_swaps rasswaps !swap_tables;
-    stage_def_arr.(i).merged_tex_swaps <- Some texswaps;
-    stage_def_arr.(i).merged_ras_swaps <- Some rasswaps
+    swizzle_arr.(i).merged_tex_swaps <- Some texswaps;
+    swizzle_arr.(i).merged_ras_swaps <- Some rasswaps
   done;
   Array.of_list !swap_tables
 
@@ -1749,11 +1768,12 @@ let _ =
       exit 1 in
   let num_stages = num_stages parsed_stages in
   print_num_stages outchan num_stages;
-  let stage_arr = array_of_stages parsed_stages num_stages in
+  let swiz_arr = array_of_swizzles parsed_stages num_stages in
+  let swap_tables = gather_swap_tables swiz_arr in
+  let stage_arr = array_of_stages parsed_stages swiz_arr num_stages in
   let num_colchans, num_texchans = max_colour_and_texcoord_channels stage_arr in
   print_num_channels outchan num_colchans num_texchans;
   output_char outchan '\n';
-  let swap_tables = gather_swap_tables stage_arr in
   let indirect_lookups = gather_indirect_lookups stage_arr in
   print_swap_tables outchan swap_tables;
   output_char outchan '\n';
@@ -1783,8 +1803,8 @@ let _ =
 		          ti.ind_dir_texcoord) in
 	      texmap', merge_indirect sip acip
 	  end in
-    print_swap_setup outchan i swap_tables stage_arr.(i).merged_tex_swaps
-		     stage_arr.(i).merged_ras_swaps;
+    print_swap_setup outchan i swap_tables swiz_arr.(i).merged_tex_swaps
+		     swiz_arr.(i).merged_ras_swaps;
     print_tev_order outchan i texmap colchan;
     print_indirect_setup outchan i indirect_lookups indir_part;
     begin match stage_arr.(i).colour_part with
