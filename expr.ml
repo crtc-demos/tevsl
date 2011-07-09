@@ -47,6 +47,8 @@ and var_param =
   | K1
   | K2
   | K3
+  | Chan0
+  | Chan1
   | Colour0
   | Alpha0
   | Colour0A0

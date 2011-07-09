@@ -22,13 +22,9 @@ let var = "tev"
 	| "k1"
 	| "k2"
 	| "k3"
-	| colour "0"
-	| "alpha0"
-	| colour "0a0"
-	| colour "1"
-	| "alpha1"
-	| colour "1a1"
-	| colour "zero"
+	| "chan0"
+	| "chan1"
+	| colour "zero"  (* Hmm, check what this is!  *)
 	| "alphabump"
 	| "alphabumpn"
 
@@ -51,12 +47,8 @@ rule token = parse
 	| "k1" -> Expr.K1
 	| "k2" -> Expr.K2
 	| "k3" -> Expr.K3
-	| "colour0" | "color0" -> Expr.Colour0
-	| "alpha0" -> Expr.Alpha0
-	| "colour0a0" | "color0a0" -> Expr.Colour0A0
-	| "colour1" | "color1" -> Expr.Colour1
-	| "alpha1" -> Expr.Alpha1
-	| "colour1a1" | "color1a1" -> Expr.Colour1A1
+	| "chan0" -> Expr.Chan0
+	| "chan1" -> Expr.Chan1
 	| "colourzero" | "colorzero" -> Expr.ColourZero
 	| "alphabump" -> Expr.AlphaBump
 	| "alphabumpn" -> Expr.AlphaBumpN

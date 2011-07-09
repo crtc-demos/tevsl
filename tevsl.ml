@@ -4,6 +4,8 @@ exception Bad_float of float
 exception Bad_int of int32
 exception Bad_bias
 
+let debug = ref false
+
 let bias_of_expr = function
     Int 0l | Float 0.0 -> TB_zero
   | Float 0.5 -> TB_addhalf
@@ -457,11 +459,11 @@ let rewrite_texmaps expr ~alpha =
 	  raise Incompatible_texmaps in
   let rec texmap_rewrite = function
     Select (Texmap (m, Texcoord c), [| A | R | G | B as lane |]) when alpha ->
-      set_texmap m c; Select (Var_ref Texture, [| X; X; X; lane |])
+      set_texmap m c; Protect (Select (Var_ref Texture, [| X; X; X; lane |]))
   | Select (Texmap (m, Texcoord c), [| _; _; _; lane |]) when alpha ->
-      set_texmap m c; Select (Var_ref Texture, [| X; X; X; lane |])
+      set_texmap m c; Protect (Select (Var_ref Texture, [| X; X; X; lane |]))
   | Select (Texmap (m, Texcoord c), lanes) when not alpha ->
-      set_texmap m c; Select (Var_ref Texture, lanes)
+      set_texmap m c; Protect (Select (Var_ref Texture, lanes))
   | Texmap (m, Texcoord c) ->
       set_texmap m c; Var_ref Texture
   | Texmap (m, itc) ->
@@ -484,19 +486,26 @@ let rewrite_colchans expr ~alpha =
 	  raise Incompatible_colour_channels in
   let expr' = map_expr
     (function
-      Var_ref Colour0 -> set_colchan Colour0; Var_ref Rasc
-    | Var_ref Alpha0 -> set_colchan Alpha0; Var_ref Rasa
-    | Var_ref Colour0A0 ->
-	set_colchan Colour0A0; if alpha then Var_ref Rasa else Var_ref Rasc
-    | Var_ref Colour1 -> set_colchan Colour1; Var_ref Rasc
-    | Var_ref Alpha1 -> set_colchan Alpha1; Var_ref Rasa
-    | Var_ref Colour1A1 ->
-	set_colchan Colour1A1; if alpha then Var_ref Rasa else Var_ref Rasc
+      Select (Var_ref (Chan0 | Chan1 as chan), [| A | R | G | B as lane |])
+      when alpha ->
+	set_colchan chan; Protect (Select (Var_ref Raster, [| X; X; X; lane |]))
+    | Select (Var_ref (Chan0 | Chan1 as chan), [| _; _; _; lane |])
+      when alpha ->
+	set_colchan chan; Protect (Select (Var_ref Raster, [| X; X; X; lane |]))
+    | Select (Var_ref (Chan0 | Chan1 as chan), lanes) when not alpha ->
+	set_colchan chan; Protect (Select (Var_ref Raster, lanes))
+    | Var_ref (Chan0 | Chan1 as chan) ->
+	set_colchan chan; Var_ref Raster
     | Var_ref ColourZero ->
-	set_colchan ColourZero; if alpha then Var_ref Rasa else Var_ref Rasc
-    | Var_ref AlphaBump -> set_colchan AlphaBump; Var_ref Rasa
+	set_colchan ColourZero;
+	if alpha then Protect (Select (Var_ref Raster, [| X; X; X; A |]))
+	else Protect (Select (Var_ref Raster, [| R; G; B; X |]))
+    | Var_ref AlphaBump ->
+	set_colchan AlphaBump;
+	Protect (Select (Var_ref Raster, [| X; X; X; A |]))
     | Var_ref AlphaBumpN ->
-	set_colchan AlphaBumpN; Var_ref Rasa (* "normalized"? *)
+	set_colchan AlphaBumpN;
+	Protect (Select (Var_ref Raster, [| X; X; X; A |])) (* "normalized"? *)
     | x -> x)
     expr in
   expr', !colchan
@@ -905,6 +914,8 @@ let string_of_var_param = function
   | K1 -> "k1"
   | K2 -> "k2"
   | K3 -> "k3"
+  | Chan0 -> "chan0"
+  | Chan1 -> "chan1"
   | Colour0 -> "colour0"
   | Alpha0 -> "alpha0"
   | Colour0A0 -> "colour0a0"
@@ -1072,6 +1083,7 @@ let print_num_channels oc colchans texchans =
 
 let swizzle_for_expr orig_expr ~alpha =
   let expr, _, _ = rewrite_texmaps orig_expr ~alpha in
+  let expr, _ = rewrite_colchans expr ~alpha in
   let texswaps, rasswaps = find_swizzles expr ~alpha in
   { tex_swaps = texswaps; ras_swaps = rasswaps }
 
@@ -1085,7 +1097,6 @@ let array_of_swizzles stage_defs ns =
 		merged_tex_swaps = None; merged_ras_swaps = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
-      Printf.printf "Array of swizzles: stage %d\n" sn;
       List.iter
         (fun stage_expr ->
 	  let stage_expr = default_assign stage_expr in
@@ -1107,20 +1118,45 @@ let array_of_swizzles stage_defs ns =
     stage_defs;
   arr
 
+(* Hmm... this seems a little overwrought.  Turn chan0/chan1 into COLOR0 or
+   ALPHA0 or COLOR0A0, etc. hardware registers depending on swizzles.  *)
+
+let remap_colchan swizzle colchan =
+  match swizzle, colchan with
+    [| _; _; _; X |], Some Chan0 -> Some Colour0
+  | [| _; _; _; X |], Some Chan1 -> Some Colour1
+  | [| X; X; X; A |], Some Chan0 -> Some Alpha0
+  | [| X; X; X; A |], Some Chan1 -> Some Alpha1
+  | _, Some Chan0 -> Some Colour0A0
+  | _, Some Chan1 -> Some Colour1A1
+  | _, x -> x
+
 exception Can't_match_stage of int
 
 let compile_expr stage orig_expr swiz ~alpha ac_var_of_expr =
+  if !debug then
+    Printf.fprintf stderr "stage %d, compile_expr: %s channel\n" stage
+		   (if alpha then "alpha" else "colour");
   let expr = rewrite_tev_vars orig_expr ~alpha in
   let expr = rewrite_rationals expr in
   let expr = rewrite_mix expr in
   let expr, const_extr = rewrite_const expr ~alpha in
-  (*Printf.printf "stage %d, after rewrite_const: %s\n" stage
-		(string_of_expression expr);*)
+  if !debug then
+    Printf.fprintf stderr "rewrite_const: %s\n" (string_of_expression expr);
   let expr, texmap_texcoord, indtex = rewrite_texmaps expr ~alpha in
-  (*Printf.printf "stage %d, after rewrite_texmaps: %s\n" stage
-		(string_of_expression expr);*)
+  if !debug then
+    Printf.fprintf stderr "rewrite_texmaps: %s\n" (string_of_expression expr);
   let expr, colchan = rewrite_colchans expr ~alpha in
+  if !debug then
+    Printf.fprintf stderr "rewrite_colchans: %s\n" (string_of_expression expr);
+  let colchan =
+    match swiz.merged_ras_swaps with
+      Some ras_swaps -> remap_colchan ras_swaps colchan
+    | None -> colchan in
   let expr = rewrite_swap_tables expr swiz ~alpha in
+  if !debug then
+    Printf.fprintf stderr "rewrite_swap_tables: %s\n"
+		   (string_of_expression expr);
   let comm_variants = commutative_variants expr in
   let matched = List.fold_right
     (fun variant found ->
@@ -1294,6 +1330,10 @@ let merge_swaps a b =
       | a, b when a = b -> a
       | _, _ -> raise Swizzle_collision)
 
+(* If we can write a swizzle using the alpha channel, do that in preference to
+   using swapped versions of the colour channels.  This allows more freedom to
+   write different swizzles within a single stage.  *)
+
 let merge_swap_list swaplist =
   List.fold_right
     (fun this merged ->
@@ -1356,8 +1396,10 @@ let gather_swap_tables swizzle_arr =
 	  texswaps, rasswaps
        | None, None ->
           [| X; X; X; X |], [| X; X; X; X |] in
-    print_swaps stderr i "texture" texswaps;
-    print_swaps stderr i "raster" rasswaps;
+    if !debug then begin
+      print_swaps stderr i "texture" texswaps;
+      print_swaps stderr i "raster" rasswaps
+    end;
     swap_tables := unique_swaps texswaps !swap_tables;
     swap_tables := unique_swaps rasswaps !swap_tables;
     swizzle_arr.(i).merged_tex_swaps <- Some texswaps;
@@ -1754,7 +1796,8 @@ let print_indirect_setup oc stagenum ind_lookups ind_part =
 let _ =
   let in_file = ref ""
   and out_file = ref "" in
-  Arg.parse ["-o", Arg.Set_string out_file, "Output file"]
+  Arg.parse ["-o", Arg.Set_string out_file, "Output file";
+	     "-d", Arg.Set debug, "Debugging"]
             (fun i -> in_file := i)
 	    "Usage: tevsl <infile> -o <outfile>";
   if !in_file = "" then
