@@ -1297,16 +1297,18 @@ let merge_swaps a b =
 let merge_swap_list swaplist =
   List.fold_right
     (fun this merged ->
-      try
-        merge_swaps this merged
-      with Swizzle_collision as e ->
-        (* Element-wise merge failed.  Try to use alpha channel.  *)
-	match this, merged with
-	  [| r1; g1; b1; X |], [| r2; g2; b2; X |] when r1 = g1 && r1 = b1 ->
-	    [| r2; g2; b2; r1 |]
-	| [| r1; g1; b1; X |], [| r2; g2; b2; X |] when r2 = g2 && r2 = b2 ->
-	    [| r1; g1; b1; r2 |]
-	| _ -> raise e)
+      match this, merged with
+	[| r1; g1; b1; X |], [| r2; g2; b2; X |] when r1 = g1 && r1 = b1 ->
+	  [| r2; g2; b2; r1 |]
+      | [| r1; g1; b1; X |], [| r2; g2; b2; a2 |] when r1 = g1 && r1 = b1
+						       && r1 == a2 ->
+	  [| r2; g2; b2; a2 |]
+      | [| r1; g1; b1; X |], [| r2; g2; b2; X |] when r2 = g2 && r2 = b2 ->
+	  [| r1; g1; b1; r2 |]
+      | [| r1; g1; b1; a1 |], [| r2; g2; b2; X |] when r2 = g2 && r2 = b2
+						       && r2 = a1 ->
+	  [| r1; g1; b1; a1 |]
+      | _ -> merge_swaps this merged)
     swaplist
     [| X; X; X; X |]
 
@@ -1341,8 +1343,8 @@ let gather_swap_tables swizzle_arr =
 	  (* Note: merge alpha before colour, because it's more highly
 	     constrained: e.g colour part can use either TEXA or TEXC, but alpha
 	     can only use TEXA.  *)
-          let texswaps = merge_swap_list (apart.tex_swaps @ cpart.tex_swaps)
-	  and rasswaps = merge_swap_list (apart.ras_swaps @ cpart.ras_swaps) in
+          let texswaps = merge_swap_list (cpart.tex_swaps @ apart.tex_swaps)
+	  and rasswaps = merge_swap_list (cpart.ras_swaps @ apart.ras_swaps) in
 	  texswaps, rasswaps
       | Some cpart, None ->
           let texswaps = merge_swap_list cpart.tex_swaps

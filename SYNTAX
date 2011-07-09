@@ -16,27 +16,11 @@ GX_TEVREG{0,1,2}	GX_CC_C{0,1,2} / GX_CC_A{0,1,2} / GX_CA_A{0,1,2}
 
 always written as "cr0", "cr1", "cr2", with lane selectors as appropriate.
 
-*** everything below here is nonsense! We need to re-spec colour0/alpha0/colour0a0 etc. instead!
+Colour channels
+---------------
 
-Colour setup		Alpha setup
-------------		-----------
-GX_CC_RASC / GX_CC_RASA	GX_CA_RASA
-
-always written as "ras", with selectors. These can use swap tables (swizzles).
-
-tev.rgb = ras.rgb	-> GX_CC_RASC, { r, g, b, x }
-tev.rgb = ras.a		-> GX_CC_RASA, { x, x, x, a }
-tev.rgb = ras.aaa	-> GX_CC_RASA, { x, x, x, a }
-
-tev.a = ras.rgb		-> (impossible)
-tev.a = ras.a		-> GX_CA_RASA, { x, x, x, a }
-tev.a = ras.r		-> GX_CA_RASA, { x, x, x, r }
-
-Colour setup		Alpha setup
-------------		-----------
-GX_CC_TEXC / GX_CC_TEXA	GX_CA_TEXA
-
-always written as "tex", with selectors. These can use swap tables (swizzles).
+colour0/colour0a0/alpha0 are written as "chan0", with swizzles.
+colour1/colour1a1/alpha1 are written as "chan1", with swizzles.
 
 Swizzles
 --------
