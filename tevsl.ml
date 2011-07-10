@@ -274,8 +274,8 @@ type ind_matrix_type =
 
 type indirect_info = {
   (* Settings in GX_SetIndTexOrder.  *)
-  ind_texmap : int;
-  ind_texcoord : int;
+  mutable ind_texmap : int;
+  mutable ind_texcoord : int;
   (* Settings in GX_SetTevIndirect.  *)
   ind_tex_format : int;
   ind_tex_bias : float array;
@@ -1046,7 +1046,8 @@ type 'ac stage_info = {
 
 type tex_info = {
   ind_dir_texcoord : int;
-  ind_dir_texmap : int option
+  mutable ind_dir_texmap : int option;
+  mutable ind_dir_nullified : bool
 }
 
 type stage_col_alpha_parts = {
@@ -1251,7 +1252,7 @@ let array_of_stages stage_defs swiz_arr ns =
 	        arr.(sn).ind_texc_part <- Some tcomp;
 		arr.(sn).ind_direct_tex_part
 		  <- Some { ind_dir_texcoord = plain_texcoord;
-			    ind_dir_texmap = None }
+			    ind_dir_texmap = None; ind_dir_nullified = false }
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs
       with
@@ -1412,6 +1413,160 @@ let add_if_different l ls =
     ls
   else
     l :: ls
+
+let merge_if_same a b complaint =
+  match a, b with
+    Some a, Some b when a = b -> a
+  | Some a, None -> a
+  | None, Some b -> b
+  | None, None -> raise Not_found
+  | _ -> failwith complaint
+
+let merge_if_same_opt a b complaint =
+  match a, b with
+    Some a, Some b when a = b -> Some a
+  | Some a, None -> Some a
+  | None, Some b -> Some b
+  | None, None -> None
+  | _ -> failwith complaint
+
+(* Extract a "direct" texmap from the colour and/or alpha parts of a stage.
+   Throw Not_found if none.  *)
+
+let extract_texmap_from_stage stage =
+  let tm_from_col =
+    match stage.colour_part with
+      Some cp ->
+	begin match cp.texmap_texc with
+          Some (tm, _) -> Some tm
+	| None -> None
+	end
+    | None -> None
+  and tm_from_alpha =
+    match stage.alpha_part with
+      Some ap ->
+        begin match ap.texmap_texc with
+	  Some (tm, _) -> Some tm
+	| None -> None
+	end
+    | None -> None in
+  merge_if_same tm_from_col tm_from_alpha "Mismatched texmaps"
+
+(* Get indirect texmap/texcoord from colour, alpha or "indirect texcoord" stage
+   parts.  *)
+
+let get_tm_and_tc_from_indirect_info ind_info =
+  if ind_info.ind_texmap == -1 || ind_info.ind_texcoord == -1 then
+    None
+  else
+    Some (ind_info.ind_texmap, ind_info.ind_texcoord)
+
+let put_tm_and_tc ind_info tm tc =
+  if ind_info.ind_texmap == -1 || ind_info.ind_texcoord == -1 then begin
+    ind_info.ind_texmap <- tm;
+    ind_info.ind_texcoord <- tc
+  end
+
+let extract_indirect_tex_info_from_stage stage =
+  let ipart = match stage.ind_texc_part with
+    Some ind_info -> get_tm_and_tc_from_indirect_info ind_info
+  | None -> None
+  and apart = match stage.alpha_part with
+    Some ap ->
+      begin match ap.indirect with
+        Some api -> get_tm_and_tc_from_indirect_info api
+      | None -> None
+      end
+  | None -> None
+  and cpart = match stage.colour_part with
+    Some cp ->
+      begin match cp.indirect with
+        Some cpi -> get_tm_and_tc_from_indirect_info cpi
+      | None -> None
+      end
+  | None -> None in
+  let acpart = merge_if_same_opt apart cpart "Indirect texture mismatch" in
+  let acipart = merge_if_same_opt acpart ipart "Indirect texture mismatch" in
+  match acipart with
+    None -> raise Not_found
+  | Some x -> x
+
+let fill_indirect_tex_info_in_stage stage tm tc =
+  begin match stage.ind_texc_part with
+    Some ind_info -> put_tm_and_tc ind_info tm tc
+  | None -> ()
+  end;
+  begin match stage.alpha_part with
+    Some ap ->
+      begin match ap.indirect with
+        Some api -> put_tm_and_tc api tm tc
+      | None -> ()
+      end
+  | None -> ()
+  end;
+  begin match stage.colour_part with
+    Some cp ->
+      begin match cp.indirect with
+        Some cpi -> put_tm_and_tc cpi tm tc
+      | None -> ()
+      end
+  | None -> ()
+  end
+
+(* Indirect lookups can be written without referring to the "direct" texture
+   lookup which the indirect lookup modifies.  We must still name a texture
+   though, and we must also "nullify" it so the texture lookup doesn't actually
+   take place.  Do a scan backwards, filling in this phantom texture info.  *)
+
+let fill_missing_indirect_lookups stage_arr =
+  let direct_ind_tex = ref None in
+  for i = Array.length stage_arr - 1 downto 0 do
+    begin
+      try
+	let tm = extract_texmap_from_stage stage_arr.(i) in
+	direct_ind_tex := Some tm
+      with Not_found -> ()
+    end;
+    match stage_arr.(i).ind_direct_tex_part with
+      Some idtp ->
+        begin match idtp.ind_dir_texmap with
+	  Some _ -> ()
+	| None ->
+	    if !debug then begin
+	      match !direct_ind_tex with
+	        Some tm ->
+		  Printf.fprintf stderr "Filling direct texmap %d at stage %d\n"
+		    tm i
+	      | None ->
+	          Printf.fprintf stderr
+		    "Not filling direct texmap at stage %d\n" i
+	    end;	        
+	    idtp.ind_dir_texmap <- !direct_ind_tex;
+	    idtp.ind_dir_nullified <- true
+	end
+    | None -> ()
+  done;
+  (* Now do a forward pass to fill in missing "true" indirect texmap/texcoord
+     indices, e.g. for indirect stages where we only add the previous indirect
+     texcoord.  *)
+  let last_ind_tex_info = ref None in
+  for i = 0 to Array.length stage_arr - 1 do
+    begin
+      try
+	let tm, tc = extract_indirect_tex_info_from_stage stage_arr.(i) in
+	last_ind_tex_info := Some (tm, tc)
+      with Not_found ->
+        begin match !last_ind_tex_info with
+	  Some (tm, tc) ->
+	    if !debug then
+	      Printf.fprintf stderr
+	        "Filling indirect texmap %d and texcoord %d in stage %d\n"
+		tm tc i;
+	    fill_indirect_tex_info_in_stage stage_arr.(i) tm tc
+	| None -> ()
+	end
+    end
+  done
 
 (*let check_ind_part ipo ind =
   match ipo with
@@ -1669,16 +1824,17 @@ let print_const_setup oc stage cst ~alpha =
 
 (* Print a normal (direct) texture lookup order.  *)
 
-let print_tev_order oc stage_num texmap colchan =
+let print_tev_order oc stage_num texmap ~nullified colchan =
   let tm, tc = match texmap with
     None -> "GX_TEXMAP_NULL", "GX_TEXCOORDNULL"
   | Some (tm, tc) ->
       "GX_TEXMAP" ^ string_of_int tm, "GX_TEXCOORD" ^ string_of_int tc
   and cc = match colchan with
     None -> "GX_COLORNULL"
-  | Some c -> string_of_colour_chan c in
-  Printf.fprintf oc "GX_SetTevOrder (%s, %s, %s, %s);\n"
-    (string_of_stagenum stage_num) tc tm cc
+  | Some c -> string_of_colour_chan c
+  and nullify = if nullified then " | GX_TEX_DISABLE" else "" in
+  Printf.fprintf oc "GX_SetTevOrder (%s, %s, %s%s, %s);\n"
+    (string_of_stagenum stage_num) tc tm nullify cc
 
 let print_tev_setup oc stage_num stage_op string_of_ac_input ~alpha =
   let acin, acop = if alpha then
@@ -1793,6 +1949,37 @@ let print_indirect_setup oc stagenum ind_lookups ind_part =
 	(string_of_gx_bool ind.ind_tex_modified_lod)
 	(string_of_alpha_select ind.ind_tex_alpha_select)
 
+(* From a STAGE (stage_info), AC_TEXMAP ((int * int) option, being the texture
+   map and texture coord for the colour/alpha parts) and AC_INDIR_PART
+   (indirect_info option), return another (int * int) option -- the "direct"
+   texture map and texture coord, and another indirect_info option, representing
+   merged indirect parts from colour, alpha and "indirect texcoord" parts.  *)
+
+let get_direct_and_indirect_tex_parts stage ac_texmap ac_indir_part =
+  let nullified = ref false in
+  let dir_tex_parts =
+    match ac_texmap, stage.ind_direct_tex_part with
+      None, None -> None
+    | Some _, None -> ac_texmap
+    | None, Some ti ->
+	if ti.ind_dir_nullified then
+	  nullified := true;
+        begin match ti.ind_dir_texmap with
+	  Some idt -> Some (idt, ti.ind_dir_texcoord)
+	| None -> failwith "Missing (maybe nullified) texmap reference"
+	end
+    | Some (tm, tc), Some ti ->
+	if ti.ind_dir_nullified then
+	  nullified := true;
+        begin match ti.ind_dir_texmap with
+	  Some idt when idt = tm && ti.ind_dir_texcoord = tc -> 
+	    ac_texmap
+	| Some _ -> failwith "Mismatched direct texcoord parts"
+	| None -> failwith "Missing (maybe nullified) texmap reference"
+	end in
+  let indir_parts = merge_indirect ac_indir_part stage.ind_texc_part in
+  dir_tex_parts, indir_parts, !nullified
+
 let _ =
   let in_file = ref ""
   and out_file = ref "" in
@@ -1821,6 +2008,7 @@ let _ =
   let num_colchans, num_texchans = max_colour_and_texcoord_channels stage_arr in
   print_num_channels outchan num_colchans num_texchans;
   output_char outchan '\n';
+  fill_missing_indirect_lookups stage_arr;
   let indirect_lookups = gather_indirect_lookups stage_arr in
   print_swap_tables outchan swap_tables;
   output_char outchan '\n';
@@ -1835,24 +2023,11 @@ let _ =
           let a, b = combine_tev_orders cp ap in
 	  a, b, merge_indirect ap.indirect cp.indirect
       | None, None -> failwith "Missing tev stage!" in
-    let texmap, indir_part =
-      match stage_arr.(i).ind_texc_part with
-        None -> ac_texmap, ac_indir_part
-      | Some ip as sip ->
-          begin match ac_indir_part with
-	    None -> ac_texmap, sip
-	  | Some _ as acip ->
-	      let texmap' =
-	        match stage_arr.(i).ind_direct_tex_part with
-		  None -> ac_texmap
-		| Some ti ->
-		    Some (0 (* FIX! ti.ind_dir_texmap *),
-		          ti.ind_dir_texcoord) in
-	      texmap', merge_indirect sip acip
-	  end in
+    let texmap, indir_part, nullified =
+      get_direct_and_indirect_tex_parts stage_arr.(i) ac_texmap ac_indir_part in
     print_swap_setup outchan i swap_tables swiz_arr.(i).merged_tex_swaps
 		     swiz_arr.(i).merged_ras_swaps;
-    print_tev_order outchan i texmap colchan;
+    print_tev_order outchan i texmap ~nullified colchan;
     print_indirect_setup outchan i indirect_lookups indir_part;
     begin match stage_arr.(i).colour_part with
       Some cpart ->
