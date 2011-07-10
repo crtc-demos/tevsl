@@ -776,7 +776,8 @@ let rec rewrite_tev_vars expr ~alpha =
         Var_ref Aprev
     | Select (Var_ref Tev, ([| R; G; B |] | [| R; G; B; _ |])) when not alpha ->
         Var_ref Cprev
-    | Select (Var_ref Tev, ([| A |] | [| A; A; A |])) when not alpha ->
+    | Select (Var_ref Tev, ([| A |] | [| A; A; A |] | [| A; A; A; _ |]))
+      when not alpha ->
         Var_ref Aprev
     | Select (Var_ref Tev, ([| A |] | [| _; _; _; A |])) when alpha ->
         Var_ref Aprev
