@@ -20,6 +20,6 @@ stage 2:
 # Do light-texture lookup from texmap1, and merge with regular texture.
 # From light texture, alpha is specular part, RGB is diffuse part.
 stage 3:
-  tev.rgb = texmap1[itexcoord + texcoord3].aaa
-            + tev.rgb * texmap1[itexcoord + texcoord3].rgb;
+  tev.rgb = clamp (texmap1[itexcoord + texcoord3].aaa
+        	   + tev.rgb * texmap1[itexcoord + texcoord3].rgb);
   tev.a = tev.a;
