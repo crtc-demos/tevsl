@@ -284,7 +284,7 @@ type indirect_info = {
   ind_tex_wrap_s : int32 option;
   ind_tex_wrap_t : int32 option;
   ind_tex_addprev : bool;
-  ind_tex_modified_lod : bool;
+  ind_tex_unmodified_lod : bool;
   ind_tex_alpha_select : texcoord option;
   
   (* Other settings.  *)
@@ -345,7 +345,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_wrap_s = modu;
 	  ind_tex_wrap_t = modu;
 	  ind_tex_addprev = false;
-	  ind_tex_modified_lod = true;
+	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
@@ -367,7 +367,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_wrap_s = modu;
 	  ind_tex_wrap_t = modu;
 	  ind_tex_addprev = false;
-	  ind_tex_modified_lod = true;
+	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
@@ -386,7 +386,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_wrap_s = Some 0l;
 	  ind_tex_wrap_t = Some 0l;
 	  ind_tex_addprev = false;
-	  ind_tex_modified_lod = true;
+	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
@@ -407,7 +407,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_wrap_s = Some 0l;
 	  ind_tex_wrap_t = Some 0l;
 	  ind_tex_addprev = false;
-	  ind_tex_modified_lod = true;
+	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
@@ -428,7 +428,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_wrap_s = modu;
 	  ind_tex_wrap_t = modu;
 	  ind_tex_addprev = false;
-	  ind_tex_modified_lod = true;
+	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
 	} in
@@ -1833,7 +1833,7 @@ let print_tev_order oc stage_num texmap ~nullified colchan =
   and cc = match colchan with
     None -> "GX_COLORNULL"
   | Some c -> string_of_colour_chan c
-  and nullify = if nullified then " | GX_TEX_DISABLE" else "" in
+  and nullify = if nullified then " | GX_TEXMAP_DISABLE" else "" in
   Printf.fprintf oc "GX_SetTevOrder (%s, %s, %s%s, %s);\n"
     (string_of_stagenum stage_num) tc tm nullify cc
 
@@ -1922,15 +1922,15 @@ let print_swap_setup oc stagenum swap_tables tex_swaps ras_swaps =
   end
 
 let string_of_ind_tev_stage n =
-  "GX_INDTEVSTAGE" ^ (string_of_int n)
+  "GX_INDTEXSTAGE" ^ (string_of_int n)
 
 let print_indirect_lookups oc lut_arr =
   Printf.fprintf oc "GX_SetNumIndStages (%d);\n" (Array.length lut_arr);
   for i = 0 to Array.length lut_arr - 1 do
     let tm, tc = lut_arr.(i) in
     Printf.fprintf oc
-      "GX_SetIndTexOrder (GX_INDTEVSTAGE%d, GX_TEXMAP%d, GX_TEXCOORD%d);\n"
-      i tm tc
+      "GX_SetIndTexOrder (GX_INDTEXSTAGE%d, GX_TEXCOORD%d, GX_TEXMAP%d);\n"
+      i tc tm
   done
 
 let print_indirect_setup oc stagenum ind_lookups ind_part =
@@ -1947,7 +1947,7 @@ let print_indirect_setup oc stagenum ind_lookups ind_part =
 	(string_of_mtxidx ind.ind_tex_matrix ind.ind_tex_scale)
 	(string_of_wrap ind.ind_tex_wrap_s) (string_of_wrap ind.ind_tex_wrap_t)
 	(string_of_gx_bool ind.ind_tex_addprev)
-	(string_of_gx_bool ind.ind_tex_modified_lod)
+	(string_of_gx_bool ind.ind_tex_unmodified_lod)
 	(string_of_alpha_select ind.ind_tex_alpha_select)
 
 (* From a STAGE (stage_info), AC_TEXMAP ((int * int) option, being the texture
