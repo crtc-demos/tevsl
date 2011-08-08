@@ -825,7 +825,8 @@ let rewrite_rationals expr =
 (* FIXME: The "D" input has more significant bits than the A, B and C inputs:
    10-bit signed versus 8-bit unsigned.  This rewriting function doesn't really
    understand that, so we may lose precision.  Maybe fix by introducing a new
-   "accumulate" operator?
+   "accumulate" operator?  (The operator is implemented now, but not in this
+   rewriting function).
    
    FIXME2: Many useful expressions (simplified versions of the general form
    supported by the TEV unit) are missing from this function.  Add them as
@@ -896,6 +897,11 @@ let rec rewrite_expr = function
 			Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
 		  Int 0l),
 	    tevscale)
+  | Mult (c, b) ->
+      Mult (Plus (Plus (Int 0l,
+			Plus (Mult (Minus (Int 1l, c), Int 0l), Mult (c, b))),
+		  Int 0l),
+	    Int 1l)
   | Ternary (a, b, c) -> Plus (Int 0l, Ternary (a, b, c))
   | Clamp expr -> Clamp (rewrite_expr expr)
   | x -> x
