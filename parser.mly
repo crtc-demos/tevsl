@@ -4,7 +4,7 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
-%token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC3 ITEXCOORD
+%token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC3 ITEXCOORD Z
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE
@@ -54,6 +54,7 @@ stage_expr:
           | ITEXCOORD ASSIGN i = rhs_expr
 					{ Expr.Assign (Expr.Itexc_dst,
 					    [| Expr.LS_S; Expr.LS_T |], i) }
+	  | Z ASSIGN i = rhs_expr	{ Expr.Assign (Expr.Z_dst, [||], i) }
 ;
 
 rhs_expr: n = INT			{ Expr.Int n }
@@ -80,6 +81,7 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| m = INDMTX			{ Expr.Indmtx m }
 	| MINUS e = rhs_expr		{ Expr.Neg e }
 	| ITEXCOORD			{ Expr.Itexcoord }
+	| Z				{ Expr.Z }
 	| a = rhs_expr EQ b = rhs_expr
 					{ Expr.Ceq (a, b) }
 	| a = rhs_expr GT b = rhs_expr

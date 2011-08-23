@@ -26,6 +26,7 @@ type expr =
   | Indmtx of ind_matrix
   | D_indmtx of dyn_ind_matrix * expr
   | Itexcoord
+  | Z
   | Protect of expr  (* Don't map child expr in map_expr.  *)
 
 (* X for "don't care".  *)
@@ -71,6 +72,7 @@ and dest_var =
   | Tevreg1
   | Tevreg2
   | Itexc_dst
+  | Z_dst
 
 and const_setting =
     KCSEL_1

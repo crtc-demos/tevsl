@@ -93,6 +93,7 @@ let map_expr func expr =
     | Indmtx im -> Indmtx im
     | D_indmtx (dim, e) -> D_indmtx (dim, scan e)
     | Itexcoord -> Itexcoord
+    | Z -> Z
     | Int i -> Int i
     | Float f -> Float f
     | Var_ref vp -> Var_ref vp
@@ -971,6 +972,7 @@ let string_of_destvar = function
   | Tevreg1 -> "tevreg1"
   | Tevreg2 -> "tevreg2"
   | Itexc_dst -> "itexcoord"
+  | Z_dst -> "z"
 
 let string_of_indmtx = function
     Ind_matrix i -> "indmtx" ^ string_of_int i
@@ -1044,6 +1046,7 @@ let string_of_expression expr =
       Buffer.add_char b ')'
   | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s)
   | Itexcoord -> Buffer.add_string b "itexcoord"
+  | Z -> Buffer.add_char b 'z'
   | Protect e ->
       Buffer.add_string b "protect(";
       scan e;
@@ -1133,6 +1136,7 @@ let array_of_swizzles stage_defs ns =
 		arr.(sn).alpha_swaps <- Some aswiz;
 		arr.(sn).colour_swaps <- Some cswiz
 	    | Assign (Itexc_dst, [| LS_S; LS_T |], e) -> ()
+	    | Assign (Z_dst, [||], _) -> ()
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs)
     stage_defs;
@@ -1272,6 +1276,9 @@ let array_of_stages stage_defs swiz_arr ns =
 		arr.(sn).ind_direct_tex_part
 		  <- Some { ind_dir_texcoord = plain_texcoord;
 			    ind_dir_texmap = None; ind_dir_nullified = false }
+	    | Assign (Z_dst, [||], e) ->
+		Printf.fprintf stderr
+		  "Z expressions not implemented, ignoring for now!\n"
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs
       with
@@ -1702,6 +1709,7 @@ let string_of_result = function
   | Tevreg1 -> "GX_TEVREG1"
   | Tevreg2 -> "GX_TEVREG2"
   | Itexc_dst -> failwith "unexpected itexcoord result"
+  | Z_dst -> failwith "unexpected Z result"
 
 let string_of_cmp_op = function
     CMP_r8_gt -> "GX_TEV_COMP_R8_GT"
@@ -2012,61 +2020,72 @@ let _ =
     failwith "Missing output file";
   let inchan = open_in !in_file in
   let outchan = open_out !out_file in
-  let parsed_stages = try
-    parse_channel inchan
-  with Expr.Parsing_stage (st, en) ->
-    Printf.fprintf stderr "Parse error: line %d[%d] to %d[%d]\n"
-      st.Lexing.pos_lnum st.Lexing.pos_bol en.Lexing.pos_lnum
-      en.Lexing.pos_bol;
-      exit 1 in
-  let num_stages = num_stages parsed_stages in
-  print_num_stages outchan num_stages;
-  let swiz_arr = array_of_swizzles parsed_stages num_stages in
-  let swap_tables = gather_swap_tables swiz_arr in
-  let stage_arr = array_of_stages parsed_stages swiz_arr num_stages in
-  let num_colchans, num_texchans = max_colour_and_texcoord_channels stage_arr in
-  print_num_channels outchan num_colchans num_texchans;
-  output_char outchan '\n';
-  fill_missing_indirect_lookups stage_arr;
-  let indirect_lookups = gather_indirect_lookups stage_arr in
-  print_swap_tables outchan swap_tables;
-  output_char outchan '\n';
-  print_indirect_lookups outchan indirect_lookups;
-  output_char outchan '\n';
-  for i = 0 to num_stages - 1 do
-    let ac_texmap, colchan, ac_indir_part =
-      match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
-        None, Some ap -> ap.texmap_texc, ap.colchan, ap.indirect
-      | Some cp, None -> cp.texmap_texc, cp.colchan, cp.indirect
-      | Some cp, Some ap ->
-          let a, b = combine_tev_orders cp ap in
-	  a, b, merge_indirect ap.indirect cp.indirect
-      | None, None -> failwith "Missing tev stage!" in
-    let texmap, indir_part, nullified =
-      get_direct_and_indirect_tex_parts stage_arr.(i) ac_texmap ac_indir_part in
-    print_swap_setup outchan i swap_tables swiz_arr.(i).merged_tex_swaps
-		     swiz_arr.(i).merged_ras_swaps;
-    print_tev_order outchan i texmap ~nullified colchan;
-    print_indirect_setup outchan i indirect_lookups indir_part;
-    begin match stage_arr.(i).colour_part with
-      Some cpart ->
-        begin match cpart.const_usage with
-	  Some cst -> print_const_setup outchan i cst ~alpha:false
-	| None -> ()
-	end;
-        print_tev_setup outchan i cpart.stage_operation string_of_tev_input
-			~alpha:false
-    | None -> ()
-    end;
-    begin match stage_arr.(i).alpha_part with
-      Some apart ->
-        begin match apart.const_usage with
-	  Some cst -> print_const_setup outchan i cst ~alpha:true
-	| None -> ()
-	end;
-        print_tev_setup outchan i apart.stage_operation
-			string_of_tev_alpha_input ~alpha:true
-    | None -> ()
-    end;
-    output_char outchan '\n'
-  done
+  try
+    let parsed_stages = try
+      parse_channel inchan
+    with Expr.Parsing_stage (st, en) ->
+      Printf.fprintf stderr "Parse error: line %d[%d] to %d[%d]\n"
+	st.Lexing.pos_lnum st.Lexing.pos_bol en.Lexing.pos_lnum
+	en.Lexing.pos_bol;
+	exit 1 in
+    close_in inchan;
+    let num_stages = num_stages parsed_stages in
+    print_num_stages outchan num_stages;
+    let swiz_arr = array_of_swizzles parsed_stages num_stages in
+    let swap_tables = gather_swap_tables swiz_arr in
+    let stage_arr = array_of_stages parsed_stages swiz_arr num_stages in
+    let num_colchans, num_texchans =
+      max_colour_and_texcoord_channels stage_arr in
+    print_num_channels outchan num_colchans num_texchans;
+    output_char outchan '\n';
+    fill_missing_indirect_lookups stage_arr;
+    let indirect_lookups = gather_indirect_lookups stage_arr in
+    print_swap_tables outchan swap_tables;
+    output_char outchan '\n';
+    print_indirect_lookups outchan indirect_lookups;
+    output_char outchan '\n';
+    for i = 0 to num_stages - 1 do
+      let ac_texmap, colchan, ac_indir_part =
+	match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
+          None, Some ap -> ap.texmap_texc, ap.colchan, ap.indirect
+	| Some cp, None -> cp.texmap_texc, cp.colchan, cp.indirect
+	| Some cp, Some ap ->
+            let a, b = combine_tev_orders cp ap in
+	    a, b, merge_indirect ap.indirect cp.indirect
+	| None, None -> failwith "Missing tev stage!" in
+      let texmap, indir_part, nullified =
+	get_direct_and_indirect_tex_parts stage_arr.(i) ac_texmap
+					  ac_indir_part in
+      print_swap_setup outchan i swap_tables swiz_arr.(i).merged_tex_swaps
+		       swiz_arr.(i).merged_ras_swaps;
+      print_tev_order outchan i texmap ~nullified colchan;
+      print_indirect_setup outchan i indirect_lookups indir_part;
+      begin match stage_arr.(i).colour_part with
+	Some cpart ->
+          begin match cpart.const_usage with
+	    Some cst -> print_const_setup outchan i cst ~alpha:false
+	  | None -> ()
+	  end;
+          print_tev_setup outchan i cpart.stage_operation string_of_tev_input
+			  ~alpha:false
+      | None -> ()
+      end;
+      begin match stage_arr.(i).alpha_part with
+	Some apart ->
+          begin match apart.const_usage with
+	    Some cst -> print_const_setup outchan i cst ~alpha:true
+	  | None -> ()
+	  end;
+          print_tev_setup outchan i apart.stage_operation
+			  string_of_tev_alpha_input ~alpha:true
+      | None -> ()
+      end;
+      output_char outchan '\n'
+    done;
+    close_out outchan
+  with e ->
+    (* An error of some sort happened, clean up.  *)
+    close_in_noerr inchan;
+    close_out_noerr outchan;
+    Sys.remove !out_file;
+    raise e

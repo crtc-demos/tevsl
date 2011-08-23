@@ -67,6 +67,7 @@ rule token = parse
 		    { INDSCALE (int_of_string n) }
   | "stage"	    { STAGE }
   | "itexcoord"     { ITEXCOORD }
+  | "z"		    { Z }
   | "+"		    { PLUS }
   | "-"		    { MINUS }
   | "**"	    { MATMUL }
