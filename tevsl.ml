@@ -94,6 +94,7 @@ let map_expr func expr =
     | D_indmtx (dim, e) -> D_indmtx (dim, scan e)
     | Itexcoord -> Itexcoord
     | Z -> Z
+    | Zbits (a, b) -> Zbits (a, scan b)
     | Int i -> Int i
     | Float f -> Float f
     | Var_ref vp -> Var_ref vp
@@ -1047,6 +1048,10 @@ let string_of_expression expr =
   | Indscale s -> Buffer.add_string b ("indscale" ^ string_of_int s)
   | Itexcoord -> Buffer.add_string b "itexcoord"
   | Z -> Buffer.add_char b 'z'
+  | Zbits (bits, e) ->
+      Buffer.add_string b (Printf.sprintf "zbits(%d," bits);
+      scan e;
+      Buffer.add_char b ')'
   | Protect e ->
       Buffer.add_string b "protect(";
       scan e;

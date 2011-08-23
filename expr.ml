@@ -27,6 +27,7 @@ type expr =
   | D_indmtx of dyn_ind_matrix * expr
   | Itexcoord
   | Z
+  | Zbits of int * expr
   | Protect of expr  (* Don't map child expr in map_expr.  *)
 
 (* X for "don't care".  *)

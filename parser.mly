@@ -7,7 +7,7 @@
 %token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC3 ITEXCOORD Z
 %token <int32> INT
 %token <float> FLOAT
-%token <int> TEXMAP TEXCOORD INDSCALE
+%token <int> TEXMAP TEXCOORD INDSCALE ZBITS
 %token <Expr.ind_matrix> INDMTX
 %token <Expr.dyn_ind_matrix> D_INDMTX
 %token <Expr.var_param> VAR
@@ -76,6 +76,8 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| v = VAR 			{ Expr.Var_ref v }
 	| m = TEXMAP LSQUARE e = rhs_expr RSQUARE
 					{ Expr.Texmap (m, e) }
+	| m = TEXMAP COLON b = ZBITS LSQUARE e = rhs_expr RSQUARE
+					{ Expr.Zbits (b, Expr.Texmap (m, e)) }
         | t = TEXCOORD			{ Expr.Texcoord t }
 	| s = INDSCALE			{ Expr.Indscale s }
 	| m = INDMTX			{ Expr.Indmtx m }

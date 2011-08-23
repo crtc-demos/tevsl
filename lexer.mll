@@ -95,6 +95,9 @@ rule token = parse
   | "mix"	    { MIX }
   | "vec3"	    { VEC3 }
   | "s10"	    { S10 }
+  | "z8"	    { ZBITS 8 }
+  | "z16"	    { ZBITS 16 }
+  | "z24" | "z24x8" { ZBITS 24 }
   | "."		    { DOT }
   | chanselect as c { let arr = Array.create (String.length c) Expr.R in
 		      for i = 0 to String.length c - 1 do
