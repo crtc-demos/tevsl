@@ -109,12 +109,12 @@ let rewrite_const expr ~alpha =
   let which_const = ref None in
   let set_const x =
     match !which_const with
-      None -> which_const := Some x; Var_ref Extracted_const
+      None -> which_const := Some x; Protect (Var_ref Extracted_const)
     | Some foo ->
         if foo <> x then
           raise Too_many_constants
 	else
-	  Var_ref Extracted_const in
+	  Protect (Var_ref Extracted_const) in
   let rec rewrite_fn = function
     Mult (Minus (Int 1l, a), b) ->
       (* Avoid rewriting the "1" in (1-x)*y -- hack!  *)
@@ -128,10 +128,14 @@ let rewrite_const expr ~alpha =
   | Float 0.375 -> set_const KCSEL_3_8
   | Float 0.25 -> set_const KCSEL_1_4
   | Float 0.125 -> set_const KCSEL_1_8
-  | Var_ref K0 when not alpha -> set_const KCSEL_K0
-  | Var_ref K1 when not alpha -> set_const KCSEL_K1
-  | Var_ref K2 when not alpha -> set_const KCSEL_K2
-  | Var_ref K3 when not alpha -> set_const KCSEL_K3
+  | (Var_ref K0 | Select (Var_ref K0, [| R; G; B |])) when not alpha ->
+      set_const KCSEL_K0
+  | (Var_ref K1 | Select (Var_ref K1, [| R; G; B |])) when not alpha ->
+      set_const KCSEL_K1
+  | (Var_ref K2 | Select (Var_ref K2, [| R; G; B |])) when not alpha ->
+      set_const KCSEL_K2
+  | (Var_ref K3 | Select (Var_ref K3, [| R; G; B |])) when not alpha ->
+      set_const KCSEL_K3
   | Select (Var_ref K0, [| R |]) -> set_const KCSEL_K0_R
   | Select (Var_ref K1, [| R |]) -> set_const KCSEL_K1_R
   | Select (Var_ref K2, [| R |]) -> set_const KCSEL_K2_R
@@ -390,8 +394,10 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
-      (* Texcoord is zeroed out anyway: pick zero.  *)
-      0, ind_info
+      (* !!! We need a texcoord which is unused, since collisions mean that
+         texcoords get scaled incorrectly.  But choosing 7 means that we'll
+	 calculate all the intervening texcoords!  That's not very good.  *)
+      7, ind_info
   | Mult (Matmul (D_indmtx (st, Texcoord from_coord), tm_bias_or_not),
 	  Indscale is) ->
       let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
@@ -897,7 +903,7 @@ let rec rewrite_expr = function
 			Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
 		  Int 0l),
 	    tevscale)
-  | Mult (c, b) ->
+  | Mult ((Var_ref _ as c), (Var_ref _ as b)) ->
       Mult (Plus (Plus (Int 0l,
 			Plus (Mult (Minus (Int 1l, c), Int 0l), Mult (c, b))),
 		  Int 0l),
