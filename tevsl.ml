@@ -70,14 +70,13 @@ let map_expr func expr =
   let rec scan e =
     match func e with
       Plus (a, b) -> Plus (scan a, scan b)
-    | Accum (a, b) -> Accum (scan a, scan b)
-    | Deaccum (a, b) -> Deaccum (scan a, scan b)
     | Minus (a, b) -> Minus (scan a, scan b)
     | Mult (a, b) -> Mult (scan a, scan b)
     | Matmul (a, b) -> Matmul (scan a, scan b)
     | Divide (a, b) -> Divide (scan a, scan b)
     | Modulus (a, b) -> Modulus (scan a, scan b)
     | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
+    | S10 a -> S10 (scan a)
     | Neg a -> Neg (scan a)
     | Clamp a -> Clamp (scan a)
     | Mix (a, b, c) -> Mix (scan a, scan b, scan c)
@@ -828,89 +827,96 @@ let rewrite_rationals expr =
   | x -> x in
   map_expr rewrite_fn expr
 
+(* Things which are (probably) valid TEV inputs.  In particular not certain
+   integers used for scale values, etc.  *)
+
+let valid_tev_input = function
+    Var_ref _ -> true
+  | Float _ -> true
+  | Int 0l | Int 1l -> true
+  | Select _ -> true
+  | Concat _ -> true
+  | _ -> false
+
+(* We can probably support a few more useful cases here.  *)
+
+let rewrite_blend_expr = function
+    (Var_ref _ | Int _ | Float _ as x) when valid_tev_input x ->
+      Plus (Mult (Minus (Int 1l, Int 0l), x), Mult (Int 0l, Int 0l))
+  | Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))
+      when c = c2 && valid_tev_input a && valid_tev_input b
+	   && valid_tev_input c ->
+      Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))
+  | Mult (a, b) when valid_tev_input a && valid_tev_input b->
+      Plus (Mult (Minus (Int 1l, a), Int 0l), Mult (a, b))
+  | Minus (Int 1l, a) when valid_tev_input a ->
+      Plus (Mult (Minus (Int 1l, a), Int 1l), Mult (a, Int 0l))
+  | e -> e  (* This is basically giving up...  *)
+
+let rewrite_ternary_expr = function
+    Ternary (a, b, c) -> Ternary (a, b, c)
+  | _ -> raise Not_found
+
+(* Rewrite expressions which accumulate (sign+10 bit) values, unaccumulate
+   values, or no accumulation.  I think there's some possible ambiguity with
+   the blend part of the expression, but the blend expression is only
+   calculated to unsigned 8-bit precision.  *)
+let rewrite_accumulate_expr acc_child = function
+    Plus (S10 (Var_ref _ | Int _ | Float _ as a), b)
+      when valid_tev_input a ->
+      Plus (a, acc_child b)
+  | Minus (S10 (Var_ref _ | Int _ | Float _ as a), b)
+      when valid_tev_input a ->
+      Minus (a, acc_child b)
+  | S10 (Var_ref _ | Int _ | Float _ as item) when valid_tev_input item ->
+      Plus (item, acc_child (Int 0l))
+  | Plus ((Var_ref _ | Int _ | Float _ as a), b) when valid_tev_input a ->
+      Plus (a, acc_child b)
+  | Minus ((Var_ref _ | Int _ | Float _ as a), b) when valid_tev_input a ->
+      Minus (a, acc_child b)
+  | (Var_ref _ | Int _ | Float _ as item) when valid_tev_input item ->
+      Plus (item, acc_child (Int 0l))
+  | e ->
+      Plus (Int 0l, acc_child e)
+
+(* Match expressions biasing TEV operation by -0.5/0.5, and also zero biases
+   or no bias at all.  *)
+let rewrite_bias_expr = function
+    Plus (e, (Float 0.5 | Int 0l | Float (-0.5) as bias)) ->
+      Plus (rewrite_accumulate_expr rewrite_blend_expr e, bias)
+  | Minus (e, (Float (0.5 as amt) | Float (-0.5 as amt))) ->
+      Plus (rewrite_accumulate_expr rewrite_blend_expr e, Float (-. amt))
+  | Minus (e, Int 0l) ->
+      Plus (rewrite_accumulate_expr rewrite_blend_expr e, Int 0l)
+  | e ->
+      Plus (rewrite_accumulate_expr rewrite_blend_expr e, Int 0l)
+
+(* Match valid expressions for scaling the final TEV result, or add a unit
+   scale if one is missing.  *)
+let rewrite_scale_expr = function
+    Mult (e, (Int 1l | Int 2l | Int 4l | Float 0.5 as factor)) ->
+      Mult (rewrite_bias_expr e, factor)
+  | e -> Mult (rewrite_bias_expr e, Int 1l)
+
+(* Match a clamp expression, or a lack of one.  *)
+let rewrite_clamp_expr = function
+    Clamp e -> Clamp (rewrite_scale_expr e)
+  | e -> rewrite_scale_expr e
+
 (* FIXME: The "D" input has more significant bits than the A, B and C inputs:
    10-bit signed versus 8-bit unsigned.  This rewriting function doesn't really
-   understand that, so we may lose precision.  Maybe fix by introducing a new
-   "accumulate" operator?  (The operator is implemented now, but not in this
-   rewriting function).
-   
-   FIXME2: Many useful expressions (simplified versions of the general form
-   supported by the TEV unit) are missing from this function.  Add them as
-   necessary!  There's no generalised solution algorithm implemented here...
-   though it'd be nice.  *)
+   understand that, so we may lose precision.  This will be fixed by
+   introducing new syntax:
 
-let rec rewrite_expr = function
-    Var_ref x ->
-      Mult (Plus (Plus (Var_ref x,
-			Plus (Mult (Minus (Int 1l, Int 0l), Int 0l),
-			      Mult (Int 0l, Int 0l))),
-		  Int 0l),
-	    Int 1l)
-  | Int x ->
-      Mult (Plus (Plus (Int x,
-			Plus (Mult (Minus (Int 1l, Int 0l), Int 0l),
-			      Mult (Int 0l, Int 0l))),
-		  Int 0l),
-	    Int 1l)
-  | Float x ->
-      Mult (Plus (Plus (Float x,
-			Plus (Mult (Minus (Int 1l, Int 0l), Int 0l),
-			      Mult (Int 0l, Int 0l))),
-		  Int 0l),
-	    Int 1l)
-  | Plus (Var_ref x, Var_ref y) ->
-      Mult (Plus (Plus (Var_ref x, Plus (Mult (Minus (Int 1l, Int 0l),
-					       Var_ref y),
-					 Mult (Int 0l, Int 0l))),
-		  Int 0l),
-	    Int 1l)
-  | Minus (Var_ref x, Var_ref y) ->
-      Mult (Plus (Minus (Var_ref x, Plus (Mult (Minus (Int 1l, Int 0l),
-						Var_ref y),
-					  Mult (Int 0l, Int 0l))),
-		  Int 0l),
-	    Int 1l)
-  | Plus (Minus (Var_ref x, Var_ref y), Float 0.5) ->
-      Mult (Plus (Minus (Var_ref x, Plus (Mult (Minus (Int 1l, Int 0l),
-						Var_ref y),
-					  Mult (Int 0l, Int 0l))),
-		  Float 0.5),
-	    Int 1l)
-  | Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b)) when c = c2 ->
-      Mult (Plus (Plus (Int 0l,
-			Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
-		  Int 0l),
-	    Int 1l)
-  | Plus (Plus (d, Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
-	  tevbias) when c = c2 ->
-      Mult (Plus (Plus (d, Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
-		  tevbias),
-	    Int 1l)
-  | Plus (Minus (d, Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
-	  tevbias) when c = c2 ->
-      Mult (Plus (Minus (d, Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
-		  tevbias),
-	    Int 1l)
-  | Plus (Var_ref d, Mult (Var_ref x, Var_ref y)) ->
-      Mult (Plus (Plus (Var_ref d, Plus (Mult (Minus (Int 1l, Var_ref x),
-					       Int 0l),
-					 Mult (Var_ref x, Var_ref y))),
-		  Int 0l),
-	    Int 1l)
-  | Mult (Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b)),
-          tevscale) when c = c2 ->
-      Mult (Plus (Plus (Int 0l,
-			Plus (Mult (Minus (Int 1l, c), a), Mult (c2, b))),
-		  Int 0l),
-	    tevscale)
-  | Mult ((Var_ref _ as c), (Var_ref _ as b)) ->
-      Mult (Plus (Plus (Int 0l,
-			Plus (Mult (Minus (Int 1l, c), Int 0l), Mult (c, b))),
-		  Int 0l),
-	    Int 1l)
-  | Ternary (a, b, c) -> Plus (Int 0l, Ternary (a, b, c))
-  | Clamp expr -> Clamp (rewrite_expr expr)
-  | x -> x
+     s10(tev) + ...
+
+   where signed+10bit values are required.  *)
+   
+let rewrite_expr expr =
+  try
+    rewrite_accumulate_expr rewrite_ternary_expr expr
+  with Not_found ->
+    rewrite_clamp_expr expr
 
 let string_of_var_param = function
     Tev -> "tev"
@@ -987,8 +993,6 @@ let string_of_expression expr =
   | Divide (a, b) -> add_binop a " / " b
   | Matmul (a, b) -> add_binop a " ** " b
   | Modulus (a, b) -> add_binop a " % " b
-  | Accum (a, b) -> add_binop a " @+ " b
-  | Deaccum (a, b) -> add_binop a " @- " b
   | Var_ref r -> Buffer.add_string b (string_of_var_param r)
   | Neg a -> Buffer.add_string b "-("; scan a; Buffer.add_char b ')'
   | Clamp a -> Buffer.add_string b "clamp("; scan a; Buffer.add_char b ')'
@@ -998,6 +1002,8 @@ let string_of_expression expr =
   | Vec3 (x, y, z) ->
       Buffer.add_string b "vec3("; scan x; Buffer.add_char b ','; scan y;
       Buffer.add_char b ','; scan z; Buffer.add_char b ')'
+  | S10 x ->
+      Buffer.add_string b "s10("; scan x; Buffer.add_char b ')'
   | Assign (dv, lsa, e) ->
       Buffer.add_string b (string_of_destvar dv);
       Buffer.add_char b '.';

@@ -69,8 +69,6 @@ rule token = parse
   | "itexcoord"     { ITEXCOORD }
   | "+"		    { PLUS }
   | "-"		    { MINUS }
-  | "@+"	    { ACCUM }
-  | "@-"	    { DEACCUM }
   | "**"	    { MATMUL }
   | "*"		    { MULT }
   | "/"		    { DIVIDE }
@@ -95,6 +93,7 @@ rule token = parse
   | "clamp"	    { CLAMP }
   | "mix"	    { MIX }
   | "vec3"	    { VEC3 }
+  | "s10"	    { S10 }
   | "."		    { DOT }
   | chanselect as c { let arr = Array.create (String.length c) Expr.R in
 		      for i = 0 to String.length c - 1 do

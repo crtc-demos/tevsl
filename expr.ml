@@ -2,8 +2,7 @@ type expr =
     Int of int32
   | Float of float
   | Plus of expr * expr
-  | Accum of expr * expr
-  | Deaccum of expr * expr
+  | S10 of expr
   | Minus of expr * expr
   | Mult of expr * expr
   | Matmul of expr * expr

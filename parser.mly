@@ -4,7 +4,7 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
-%token LBRACE RBRACE DOT ACCUM DEACCUM MATMUL MODULUS VEC3 ITEXCOORD
+%token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC3 ITEXCOORD
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE
@@ -16,7 +16,7 @@
 
 %left QUESTIONMARK COLON
 %left EQ LT GT
-%left PLUS MINUS ACCUM DEACCUM
+%left PLUS MINUS
 %left MULT DIVIDE MODULUS
 %right MATMUL
 
@@ -62,10 +62,6 @@ rhs_expr: n = INT			{ Expr.Int n }
 					{ Expr.Plus (a, b) }
 	| a = rhs_expr MINUS b = rhs_expr
 					{ Expr.Minus (a, b) }
-	| a = rhs_expr ACCUM b = rhs_expr
-					{ Expr.Accum (a, b) }
-	| a = rhs_expr DEACCUM b = rhs_expr
-					{ Expr.Deaccum (a, b) }
 	| a = rhs_expr MULT b = rhs_expr
 					{ Expr.Mult (a, b) }
 	| a = rhs_expr MATMUL b = rhs_expr
@@ -100,6 +96,8 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| VEC3 LPAREN a = rhs_expr COMMA b = rhs_expr COMMA
 	  c = rhs_expr RPAREN
 					{ Expr.Vec3 (a, b, c) }
+	| S10 LPAREN a = rhs_expr RPAREN
+					{ Expr.S10 a }
 	| c = D_INDMTX LPAREN e = rhs_expr RPAREN
 					{ Expr.D_indmtx (c, e) }
 	| e = rhs_expr DOT c = CHANSELECT
