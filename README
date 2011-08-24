@@ -90,7 +90,7 @@ stage 0:
 and you will get the expected result. Beware that this is no computer algebra
 system which can infer the correct form of expression from anything you feed it
 though! Though tevsl makes some attempt to match what you give it, you might
-need to rearrange your formulae manually to make it recognize them properly
+need to rearrange your formulae manually to make it recognize them properly.
 
 Other features available are as follows.
 
