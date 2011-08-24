@@ -97,7 +97,7 @@ Value ranges
 ------------
 
 The normal TEV setup functions provide the illusion that colour and alpha values
-fall in the range 0-1, and tevsl follows that convention also.
+fall in the range 0-1, and tevsl follows the same convention.
 
 Clamping
 --------
@@ -122,7 +122,7 @@ This maps directly to:
 
 This is similar to the GLSL mix() function: 0 for <amt> gives the value of
 <var1>, 1 for <amt> gives the value of <var2>, and inbetween values linearly
-interpolate between the two.
+interpolate between the two. Channels are mixed independently.
 
 Note that using this means the canonical TEV expression can be written more
 concisely as:
@@ -171,17 +171,23 @@ If you just write "tev" on the LHS of an expression, then both colour and alpha
 expressions will be defined. In that case you're limited to the subset of
 expressions which are valid for both the alpha and colour TEV parts.
 
+You can also write all channels explicitly if you wish:
+
+  tev.rgba = chan0.rgba;
+
 Available variables and constants
 ---------------------------------
 
 The following variables and constants are available for use in expressions.
 
-  * "tev". Usually used for the output of the previous stage.
-  
+  * "tev". Usually used for the output of the previous stage. The last stage
+    MUST send its output to tev.
+
   * "cr0", "cr1", "cr2". These may be used on the LHS of RHS of expressions, and
     correspond to the TEV registers which can be used for constant inputs to the
-    TEV, or for intermediate results.  These map to GX_TEVREG{0,1,2} on the LHS
-    of expressions, or GX_CC_C{0,1,2} etc. on the RHS of expressions.
+    TEV, or for intermediate results. These map to GX_TEVREG{0,1,2} on the LHS
+    of expressions, or GX_CC_C{0,1,2} etc. on the RHS of expressions. When used
+    as constants, these are set using GX_SetTevColor.
 
 These variables can be used with channel selectors:
 
@@ -194,10 +200,11 @@ For alpha channels, e.g.:
 
   tev.a = cr1.a;
 
-There's no facility to swizzle colours with the tev/crN variables. These are all
-"signed 10 bit" quantities (referred to as such in various documentation,
-although the sign is in fact separate from the 10 bits, so -1024 to 1023 can be
-represented). See later for more discussion on that subject.
+There's no facility to swizzle colours with the tev/crN variables beyond the
+alpha selection already shown (.aaa). These are "signed 10 bit" quantities (at
+least they are referred to as such in various documentation, although the sign
+is in fact separate from the 10 bits, so -1024 to 1023 can be represented). See
+later for more discussion on that subject.
 
   * "texmapN[texcoordM]". This is a regular texture lookup: coordinates
     "texcoordM" are looked up in texture "texmapN".
@@ -208,7 +215,8 @@ represented). See later for more discussion on that subject.
 
 Both texmap and chan0/chan1 variables may use arbitrary swizzles, which are
 automatically mapped to the TEV's swap tables (there are only four channel
-combinations possible in total, however). So you can write any of:
+combinations possible in total, however: tevsl will give an error if you attempt
+to use too many). So you can write any of:
 
   tev.rgb = chan0.rgb;
   
@@ -224,10 +232,12 @@ combinations possible in total, however). So you can write any of:
 
 Even corner cases such as the last are supported, since alpha and colour
 channels can be referred to independently by the colour TEV channels, and both
-are subject to exchange via swap tables.
+are subject to remapping via swap tables.
 
-You can only refer to one of chan0/chan1 in each TEV stage, and you can only
-refer to a single regular texture in each stage also.
+You can use independent swizzles for texture-map lookups and for the rasterised
+colour channels. You can only refer to one of chan0/chan1 in each TEV stage, and
+you can only refer to a single regular texture in each stage also (you can't use
+different colour channels/texture maps in colour and alpha expressions).
 
   * "k0", "k1", "k2", "k3". These four are extra "konstant" colour channels,
     which can be used to pass constant values to the TEV. These are somewhat
@@ -279,13 +289,19 @@ You can also do element-wise comparisons:
 
   tev.rgb = (texmap1[texcoord1].rgb > tev.rgb) ? 1 : 0;
 
-then three separate 8-bit comparisons will be performed, and the corresponding
-results written to the RGB channels of TEV.
+then three separate 8-bit comparisons will be performed for each of the R, G and
+B channels, and the corresponding results written to the RGB channels of TEV.
 
 You can also use a different syntax to "concatenate" channels, and do 16- or
 24-bit comparisons:
 
   tev.rgb = (texmap1[texcoord1]{gr} > tev{gr}) ? 1 : 0;
+
+In such expressions, the most-significant channel comes first, the
+least-significant last. The "canonical" ordering of these channels is "bgr",
+i.e. concatenation expressions are written "the other way round" from selection
+expressions (using .rgb syntax). This shouldn't really be relevant unless you're
+running short on swap tables, though.
 
 The "false" arm of the ternary expression must be zero.
 
