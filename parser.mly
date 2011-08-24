@@ -14,11 +14,12 @@
 %token <Expr.dest_var> DESTVAR
 %token <Expr.lane_select array> CHANSELECT
 
-%left QUESTIONMARK COLON
+%left QUESTIONMARK
 %left EQ LT GT
 %left PLUS MINUS
 %left MULT DIVIDE MODULUS
 %right MATMUL
+%right COLON
 
 %start <(int * Expr.expr list) list> stage_defs
 
@@ -100,7 +101,7 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| VEC3 LPAREN a = rhs_expr COMMA b = rhs_expr COMMA
 	  c = rhs_expr RPAREN
 					{ Expr.Vec3 (a, b, c) }
-	| S10 LPAREN a = rhs_expr RPAREN
+	| a = rhs_expr COLON S10
 					{ Expr.S10 a }
 	| c = D_INDMTX LPAREN e = rhs_expr RPAREN
 					{ Expr.D_indmtx (c, e) }
