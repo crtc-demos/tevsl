@@ -309,8 +309,9 @@ Signed 10-bit values
 --------------------
 
 Tevsl usually makes no distinction between unsigned 8-bit values and signed
-10-bit values. If the data type is important, you should write an annotation
-against that variable:
+10-bit values (it could try harder to DTRT actually, although there would still
+be abiguous cases). If the data type is important, you should write an
+annotation against that variable:
 
   tev = (tev:s10) + cr1;
 
