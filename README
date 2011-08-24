@@ -39,7 +39,8 @@ Ideally, you should set up Makefile rules so that .inc files are automatically
 regenerated when you edit the corresponding .tev file.
 
 Tevsl sets up many of the parameters concerning TEV configuration, greatly
-reducing the need for you to keep track of the TEV state yourself. See later (????) for a full list of the functions which tevsl subsumes.
+reducing the need for you to keep track of the TEV state yourself. See later
+for a full list of the functions which tevsl subsumes.
 
 Basic syntax
 ------------
@@ -92,7 +93,8 @@ Other features available are as follows.
 Value ranges
 ------------
 
-The normal TEV setup functions provide the illusion that colour and alpha values fall in the range 0-1, and tevsl follows that convention also.
+The normal TEV setup functions provide the illusion that colour and alpha values
+fall in the range 0-1, and tevsl follows that convention also.
 
 Clamping
 --------
@@ -144,7 +146,8 @@ fully in the following sections.
 Separate colour/alpha expressions
 ---------------------------------
 
-The colour and alpha settings for each TEV stage are independent. You can describe this to tevsl by writing separate equations, like so:
+The colour and alpha settings for each TEV stage are independent. You can
+describe this to tevsl by writing separate equations, like so:
 
 stage 0:
   tev.rgb = chan0.rgb;
@@ -273,7 +276,8 @@ You can also do element-wise comparisons:
 
   tev.rgb = (texmap1[texcoord1].rgb > tev.rgb) ? 1 : 0;
 
-then three separate 8-bit comparisons will be performed, and the corresponding results written to the RGB channels of TEV.
+then three separate 8-bit comparisons will be performed, and the corresponding
+results written to the RGB channels of TEV.
 
 You can also use a different syntax to "concatenate" channels, and do 16- or
 24-bit comparisons:
@@ -298,16 +302,17 @@ to the lower 8-bits and interpret them as an unsigned value.
 Indirect texture lookups
 ------------------------
 
-Tevsl contains support for configuring indirect texture lookups. These can be
+Tevsl provides support for configuring indirect texture lookups. These can be
 written using a couple of different syntaxes.
 
-The simplest form is as follows:
+A simple form is as follows:
 
   tev = texmap0[indmtx0 ** texmap1[texcoord0] * indscale0];
 
 "indmtx0" and "indscale0" here refer to the indirect matrix and scale set by the
 GX_SetIndTexMatrix API. This expression will look up a texel from
-texmap1[texcoord0], matrix-multiply GX_ITM_0 with it, then scale the result.
+texmap1[texcoord0], matrix-multiply GX_ITM_0 with it, then scale each component
+of the result.
 
 You can also use a bias expression:
 
@@ -317,7 +322,8 @@ bias can be, e.g.:
 
   vec3 (-128, -128, 0)
 
-where the values can each be either -128 or 0. (Other biases are used under certain circumstances, but those are not yet implemented.)
+where the values can each be either -128 or 0. (Other biases are used under
+certain circumstances, but those are not yet implemented.)
 
 You can add a regular texcoord to an indirectly looked-up texcoord:
 
@@ -332,7 +338,8 @@ writing:
 
   itexcoord = indmtx0 ** texmap1[texcoord0] * indscale0;
 
-and you can add to the indirect coordinate calculated by the previous stage (only) by writing:
+and you can add to the indirect coordinate calculated by the previous stage
+(only) by writing:
 
   itexcoord = itexcoord + indmtx0 ** texmap1[texcoord0] * indscale0;
 
@@ -365,7 +372,7 @@ TBD.
 List of supported APIs
 ----------------------
 
-Using tevsl frees you from calling any of the following APIs manually.
+Using tevsl frees you of the need to call any of the following APIs manually:
 
   * GX_SetNumTevStages
   * GX_SetNumChans
