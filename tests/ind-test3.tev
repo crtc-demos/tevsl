@@ -1,0 +1,2 @@
+stage 0:
+  tev = texmap0[(texcoord1 % 32) + indmtx0 ** texmap1[texcoord0] * indscale0];

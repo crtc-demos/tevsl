@@ -1,0 +1,5 @@
+stage 0:
+  tev = s10(tev) + chan0;
+
+stage 1:
+  tev = tev + s10(chan0);

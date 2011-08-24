@@ -1,0 +1,396 @@
+TEVSL
+=====
+
+What is it?
+-----------
+
+Tevsl is a kind-of fragment-shading language for the Nintendo GameCube & Wii
+consoles (it has only been tested on the GameCube so far, however). The aim is
+to simplify programming of the texture environment unit of the Flipper/Hollywood
+chips, moving some way towards making the fixed-function pipeline appear more
+like a programmable graphics chip, without sacrificing any of its performance or
+capabilities.
+
+Hopefully the friendly syntax of tevsl shader descriptions will make it easier
+to fully exploit the capabilities of the graphics chips in question.
+
+How does it work?
+-----------------
+
+Short stage-by-stage "shader" descriptions are fed into tevsl, which processes
+them and emits a description which can be directly #included into C code. For
+example basic texture mapping can be achieved by writing the following:
+
+stage 0:
+  tev = texmap0[texcoord0];
+
+This can be compiled as follows:
+
+$ tevsl basic-texture.tev -o basic-texture.inc
+
+and then in your C program:
+
+void setup_basic_texture_mapping (void)
+{
+#include "basic-texture.inc"
+}
+
+Ideally, you should set up Makefile rules so that .inc files are automatically
+regenerated when you edit the corresponding .tev file.
+
+Tevsl sets up many of the parameters concerning TEV configuration, greatly
+reducing the need for you to keep track of the TEV state yourself. See later (????) for a full list of the functions which tevsl subsumes.
+
+Basic syntax
+------------
+
+You must write consecutively-numbered definitions for each of the stages you
+want to use:
+
+stage 0:
+  tev = ...;
+
+stage 1:
+  tev = ...;
+
+(The need to manually number stages may disappear at some point.)
+
+The left-hand side of each assignment corresponds to the output of the TEV
+environment for each stage, and the RHS of the assignment corresponds to the
+inputs to that stage and processing which is done on those inputs. You should
+only write one "tev =" expression per stage, though that's not the whole story:
+see below for more.
+
+Though several kinds of expression are supported, note that tevsl can't
+magically add programmability to Flipper/Hollywood chip: so, you're quite
+restricted in what you can write on the RHS of each stage description.
+
+The "canonical" form of expression which is supported is as follows:
+
+stage 0:
+  tev = (<accum> [+/-] ((1 - c) * a + c * b) + <bias>) * <scale>;
+
+You can write such expressions out "in full", e.g.:
+
+stage 0:
+  tev = (tev + ((1 - chan0) * texmap0[texcoord0] + chan0 * cr0) + 0) * 2;
+
+Or, since you won't want to use all the available functionality per-stage all
+the time, you can write simplified versions of the expression and tevsl will
+rewrite the expression for you into the fixed format required by the hardware.
+So you can write, e.g.:
+
+stage 0:
+  tev = texmap0[texcoord0] + chan0;
+
+and you will get the expected result. Beware that this is no computer algebra
+system which can infer the correct form of expression from anything you feed it
+though!
+
+Other features available are as follows.
+
+Value ranges
+------------
+
+The normal TEV setup functions provide the illusion that colour and alpha values fall in the range 0-1, and tevsl follows that convention also.
+
+Clamping
+--------
+
+You can clamp the result of each TEV stage (to 0-1, i.e. the maximum and minimum
+representable values for each of the R,G,B,A colour channels), by writing:
+
+  tev = clamp (<expr>);
+
+around your expression.
+
+Blending
+--------
+
+A simplified form of syntax is provided for writing blending equations:
+
+  tev = mix (<var1>, <var2>, <amt>);
+
+This maps directly to:
+
+  tev = (1 - <amt>) * <var1> + <amt> * <var2>;
+
+This is similar to the GLSL mix() function: 0 for <amt> gives the value of
+<var1>, 1 for <amt> gives the value of <var2>, and inbetween values linearly
+interpolate between the two.
+
+Note that using this means the canonical TEV expression can be written more
+concisely as:
+
+  tev = (<accum> [+/-] mix (<var1>, <var2>, <amt>) + <bias>) * <scale>;
+
+Simplified forms
+----------------
+
+Quite a few simplified forms of the above expression are recognized. These are a
+few examples.
+
+  tev = tev + chan0;
+
+  tev = tev * 2;
+  
+  tev = tev / 2;
+  
+  tev = clamp (chan0.aaa + chan0.rgb);
+
+The last of these introduces a new feature, channel selection, described more
+fully in the following sections.
+
+Separate colour/alpha expressions
+---------------------------------
+
+The colour and alpha settings for each TEV stage are independent. You can describe this to tevsl by writing separate equations, like so:
+
+stage 0:
+  tev.rgb = chan0.rgb;
+  tev.a = 1;
+
+You can't split channels in different groupings from these on the LHS of these
+expressions though: we're limited to what's supported by the TEV unit (and we
+don't support some other things which might be supportable). E.g. this will NOT
+work:
+
+stage 0:
+  tev.r = chan0.r;
+  tev.g = chan0.g;
+  tev.b = chan0.b;
+  tev.a = chan0.a;
+
+If you just write "tev" on the LHS of an expression, then both colour and alpha
+expressions will be defined. In that case you're limited to the subset of
+expressions which are valid for both the alpha and colour TEV parts.
+
+Available variables and constants
+---------------------------------
+
+The following variables and constants are available for use in expressions.
+
+  * "tev". Usually used for the output of the previous stage.
+  
+  * "cr0", "cr1", "cr2". These may be used on the LHS of RHS of expressions, and
+    correspond to the TEV registers which can be used for constant inputs to the
+    TEV, or for intermediate results.  These map to GX_TEVREG{0,1,2} on the LHS
+    of expressions, or GX_CC_C{0,1,2} etc. on the RHS of expressions.
+
+These variables can be used with channel selectors:
+
+For colour channels, e.g.
+
+  tev.rgb = tev.rgb;  (pass through colour unchanged)
+  tev.rgb = cr0.aaa;
+  
+For alpha channels, e.g.:
+
+  tev.a = cr1.a;
+
+There's no facility to swizzle colours with the tev/crN variables. These are all
+"signed 10 bit" quantities (referred to as such in various documentation,
+although the sign is in fact separate from the 10 bits, so -1024 to 1023 can be
+represented). See later for more discussion on that subject.
+
+  * "texmapN[texcoordM]". This is a regular texture lookup: coordinates
+    "texcoordM" are looked up in texture "texmapN".
+  
+  * "chan0", "chan1". These are the rasterised colour channels 0 and 1 (like
+    "varying" values in GLSL), used for vertex colouring or lighting
+    calculations.
+
+Both texmap and chan0/chan1 variables may use arbitrary swizzles, which are
+automatically mapped to the TEV's swap tables (there are only four channel
+combinations possible in total, however). So you can write any of:
+
+  tev.rgb = chan0.rgb;
+  
+  tev.rgb = chan0.rrr;
+  
+  tev.rgb = chan1.bgr;
+  
+  tev.a = texmap0[texcoord1].g;
+  
+  tev.rgb = chan1.aaa;
+  
+  tev.rgb = chan1.rrr + chan1.ggg;
+
+Even corner cases such as the last are supported, since alpha and colour
+channels can be referred to independently by the colour TEV channels, and both
+are subject to exchange via swap tables.
+
+You can only refer to one of chan0/chan1 in each TEV stage, and you can only
+refer to a single regular texture in each stage also.
+
+  * "k0", "k1", "k2", "k3". These four are extra "konstant" colour channels,
+    which can be used to pass constant values to the TEV. These are somewhat
+    like GLSL "uniform"s. These are unsigned 8-bit values only, and can be set
+    with GX_SetTevKColor.
+
+You can write each of these using ".rgb" (for the colour part of the TEV)
+selectors, or using all-same selectors, ".rrr", ".ggg" etc., although you can't
+use swizzles other than those.
+
+  tev.rgb = k0.rgb;
+
+  tev.a = k0.a;
+
+  tev.rgb = k1.rrr;
+
+  tev.a = k0.g;
+
+For all variables, writing them without a selector infers ".rgb" for colour
+channels, and ".a" for alpha channels.
+
+Some constants are available:
+
+  * "0", "1", "0.5", "1/8", "2/8", "3/8", etc.. Other constants are available,
+    and may be mapped to either regular constants, or "konstant" constants, as
+    appropriate. You may only have one "konstant" value per colour- or
+    alpha-part of each stage: tevsl will give an error if your expression needs
+    more than that.
+
+Constants are replicated across each channel.
+
+Ternary (conditional) expressions
+---------------------------------
+
+You can write conditional expressions using C-like ternary operations. The
+general form of these look like this:
+
+  tev = <accum> [+/-] ((<var1> <cmp> <var2>) ? <true-val> : 0);
+
+A concrete example, an 8-bit comparison:
+
+  tev.rgb = (texmap1[texcoord1].r > tev.r) ? 1 : 0;
+
+The R, G, and B channels of the TEV output for this stage will each be set to 1
+(if the comparison is true), or 0 (if it is false). You can also use "==" for an
+equality test.
+
+You can also do element-wise comparisons:
+
+  tev.rgb = (texmap1[texcoord1].rgb > tev.rgb) ? 1 : 0;
+
+then three separate 8-bit comparisons will be performed, and the corresponding results written to the RGB channels of TEV.
+
+You can also use a different syntax to "concatenate" channels, and do 16- or
+24-bit comparisons:
+
+  tev.rgb = (texmap1[texcoord1]{gr} > tev{gr}) ? 1 : 0;
+
+The "false" arm of the ternary expression must be zero.
+
+Signed 10-bit values
+--------------------
+
+Tevsl usually makes no distinction between unsigned 8-bit values and signed
+10-bit values. If the data type is important, you should write an annotation
+against that variable:
+
+  tev = (tev:s10) + cr1;
+
+This will attempt to ensure that the "tev" input will end up in the D input,
+where it will be used properly as a signed 10-bit value. Other inputs truncate
+to the lower 8-bits and interpret them as an unsigned value.
+
+Indirect texture lookups
+------------------------
+
+Tevsl contains support for configuring indirect texture lookups. These can be
+written using a couple of different syntaxes.
+
+The simplest form is as follows:
+
+  tev = texmap0[indmtx0 ** texmap1[texcoord0] * indscale0];
+
+"indmtx0" and "indscale0" here refer to the indirect matrix and scale set by the
+GX_SetIndTexMatrix API. This expression will look up a texel from
+texmap1[texcoord0], matrix-multiply GX_ITM_0 with it, then scale the result.
+
+You can also use a bias expression:
+
+  tev = texmapN[<indmtx> ** (texmapO[texcoordP] + <bias>) * indscaleM];
+
+bias can be, e.g.:
+
+  vec3 (-128, -128, 0)
+
+where the values can each be either -128 or 0. (Other biases are used under certain circumstances, but those are not yet implemented.)
+
+You can add a regular texcoord to an indirectly looked-up texcoord:
+
+  tev = texmap0[texcoord1 + indmtx0 ** texmap1[texcoord0] * indscale0];
+
+Or you can use wrapping on the regular texture using a "modulus" operator:
+
+  tev = texmap0[(texcoord1 % 32) + indmtx0 ** texmap1[texcoord0] * indscale0];
+
+You can perform indirect texture lookups without also doing a regular lookup by
+writing:
+
+  itexcoord = indmtx0 ** texmap1[texcoord0] * indscale0;
+
+and you can add to the indirect coordinate calculated by the previous stage (only) by writing:
+
+  itexcoord = itexcoord + indmtx0 ** texmap1[texcoord0] * indscale0;
+
+An implementation detail: when you use this syntax, tevsl takes care of
+inserting "GX_TEXMAP_DISABLE" for the appropriate GX_SetTevOrder command for
+you.
+
+If you want to use the "dynamic" S and T-type matrices, you can write that as,
+for example:
+
+stage 2:
+  itexcoord = itexcoord
+	      + (t_dynmtx (texcoord2) ** (texmap2[texcoord0]
+					  + vec3 (-128.0, -128.0, 0)))
+		* indscale0;
+  tev = tev;
+
+"s_dynmtx" and "t_dynmtx" depend on the texcoord from the "regular" texture
+lookup for the stage, so are written using function-like syntax with that
+texcoord as an argument.
+
+Tevsl automatically infers texmap and texcoord numbers to use for some of the
+above usage scenarios. It might get it wrong sometimes...
+
+Z textures
+----------
+
+TBD.
+
+List of supported APIs
+----------------------
+
+Using tevsl frees you from calling any of the following APIs manually.
+
+  * GX_SetNumTevStages
+  * GX_SetNumChans
+  * GX_SetNumTexGens
+  * GX_SetTevSwapModeTable
+  * GX_SetTevSwapMode
+  * GX_SetNumIndStages
+  * GX_SetIndTexOrder
+  * GX_SetTevOrder
+  * GX_SetTevDirect
+  * GX_SetTevIndirect
+  * GX_SetTevColorIn
+  * GX_SetTevColorOp
+  * GX_SetTevAlphaIn
+  * GX_SetTevAlphaOp
+  * GX_SetTevKColorSel
+  * GX_SetTevKAlphaSel
+
+Soon:
+
+  * GX_SetZMode
+  * GX_SetZTexture
+  * GX_SetZCompLoc (maybe?)
+
+Bugs
+----
+
+Many and varied! Most error detection and reporting is nonexistent or poor.

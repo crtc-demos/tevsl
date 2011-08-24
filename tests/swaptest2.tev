@@ -1,0 +1,2 @@
+stage 0:
+  tev.rgb = texmap0[texcoord0].rrr + texmap0[texcoord0].ggg;
