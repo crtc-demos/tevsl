@@ -6,13 +6,16 @@ What is it?
 
 Tevsl is a kind-of fragment-shading language for the Nintendo GameCube & Wii
 consoles (it has only been tested on the GameCube so far, however). The aim is
-to simplify programming of the texture environment unit of the Flipper/Hollywood
-chips, moving some way towards making the fixed-function pipeline appear more
-like a programmable graphics chip, without sacrificing any of its performance or
+to simplify programming of the texture environment units of the
+Flipper/Hollywood chips, moving some way towards making their fixed-function
+fragment-processing pipelines appear more like those available on a modern
+fully-programmable GPU, without sacrificing any of their performance or
 capabilities.
 
 Hopefully the friendly syntax of tevsl shader descriptions will make it easier
-to fully exploit the capabilities of the graphics chips in question.
+to fully exploit the capabilities of Flipper/Hollywood GPUs, by making it
+clearer what each processing stage is doing and by making modifications to the
+fragment-processing setup much easier to accomplish.
 
 How does it work?
 -----------------
@@ -397,7 +400,9 @@ Soon:
   * GX_SetZTexture
   * GX_SetZCompLoc (maybe?)
 
-Bugs
-----
+Bugs & drawbacks
+----------------
 
-Many and varied! Most error detection and reporting is nonexistent or poor.
+Many and varied! Most error detection and reporting is nonexistent or poor. TEV
+descriptions are very static, which might limit the way effects can be combined
+or altered at runtime.
