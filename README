@@ -440,7 +440,7 @@ You can use Z-texturing by writing an expression at the last stage, e.g.:
 'fmt' must be z8, z16 or z24 (or z24x8, which is identical in meaning to the
 last). This specifies the format of the Z texture texmapM, since the Z-texture
 setup function needs to know that, and tevsl doesn't otherwise know what the
-format is.
+format should be.
 
 'offset' is a 24-bit offset which may optionally be added to the Z texture.
 

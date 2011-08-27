@@ -102,6 +102,13 @@ let map_expr func expr =
     | Protect e -> e in
   scan expr
 
+let kcsel_of_var = function
+    K0 -> KCSEL_K0
+  | K1 -> KCSEL_K1
+  | K2 -> KCSEL_K2
+  | K3 -> KCSEL_K3
+  | _ -> failwith "Not KCSEL"
+
 exception Too_many_constants
 
 (* Find special-valued "konst" constants in expression, and separate them
@@ -130,30 +137,78 @@ let rewrite_const expr ~alpha =
   | Float 0.375 -> set_const KCSEL_3_8
   | Float 0.25 -> set_const KCSEL_1_4
   | Float 0.125 -> set_const KCSEL_1_8
-  | (Var_ref K0 | Select (Var_ref K0, [| R; G; B |])) when not alpha ->
-      set_const KCSEL_K0
-  | (Var_ref K1 | Select (Var_ref K1, [| R; G; B |])) when not alpha ->
-      set_const KCSEL_K1
-  | (Var_ref K2 | Select (Var_ref K2, [| R; G; B |])) when not alpha ->
-      set_const KCSEL_K2
-  | (Var_ref K3 | Select (Var_ref K3, [| R; G; B |])) when not alpha ->
-      set_const KCSEL_K3
-  | Select (Var_ref K0, [| R |]) -> set_const KCSEL_K0_R
-  | Select (Var_ref K1, [| R |]) -> set_const KCSEL_K1_R
-  | Select (Var_ref K2, [| R |]) -> set_const KCSEL_K2_R
-  | Select (Var_ref K3, [| R |]) -> set_const KCSEL_K3_R
-  | Select (Var_ref K0, [| G |]) -> set_const KCSEL_K0_G
-  | Select (Var_ref K1, [| G |]) -> set_const KCSEL_K1_G
-  | Select (Var_ref K2, [| G |]) -> set_const KCSEL_K2_G
-  | Select (Var_ref K3, [| G |]) -> set_const KCSEL_K3_G
-  | Select (Var_ref K0, [| B |]) -> set_const KCSEL_K0_B
-  | Select (Var_ref K1, [| B |]) -> set_const KCSEL_K1_B
-  | Select (Var_ref K2, [| B |]) -> set_const KCSEL_K2_B
-  | Select (Var_ref K3, [| B |]) -> set_const KCSEL_K3_B
-  | Select (Var_ref K0, [| A |]) -> set_const KCSEL_K0_A
-  | Select (Var_ref K1, [| A |]) -> set_const KCSEL_K1_A
-  | Select (Var_ref K2, [| A |]) -> set_const KCSEL_K2_A
-  | Select (Var_ref K3, [| A |]) -> set_const KCSEL_K3_A
+  | Var_ref (K0 | K1 | K2 | K3 as k)
+  | Select (Var_ref (K0 | K1 | K2 | K3 as k),
+	    ([| R; G; B |] | [| R; G; B; _ |])) when not alpha ->
+      set_const (kcsel_of_var k)
+  | Var_ref (K0 | K1 | K2 | K3 as k)
+  | Select (Var_ref (K0 | K1 | K2 | K3 as k),
+	    ([| A |] | [| _; _; _; A |])) when alpha ->
+      set_const (kcsel_of_var k)
+  | Select (Var_ref K0, ([| R; R; R |] | [| R; R; R; _ |])) when not alpha ->
+      set_const KCSEL_K0_R
+  | Select (Var_ref K1, ([| R; R; R |] | [| R; R; R; _ |])) when not alpha ->
+      set_const KCSEL_K1_R
+  | Select (Var_ref K2, ([| R; R; R |] | [| R; R; R; _ |])) when not alpha ->
+      set_const KCSEL_K2_R
+  | Select (Var_ref K3, ([| R; R; R |] | [| R; R; R; _ |])) when not alpha ->
+      set_const KCSEL_K3_R
+  | Select (Var_ref K0, ([| G; G; G |] | [| G; G; G; _ |])) when not alpha ->
+      set_const KCSEL_K0_G
+  | Select (Var_ref K1, ([| G; G; G |] | [| G; G; G; _ |])) when not alpha ->
+      set_const KCSEL_K1_G
+  | Select (Var_ref K2, ([| G; G; G |] | [| G; G; G; _ |])) when not alpha ->
+      set_const KCSEL_K2_G
+  | Select (Var_ref K3, ([| G; G; G |] | [| G; G; G; _ |])) when not alpha ->
+      set_const KCSEL_K3_G
+  | Select (Var_ref K0, ([| B; B; B |] | [| B; B; B; _ |])) when not alpha ->
+      set_const KCSEL_K0_B
+  | Select (Var_ref K1, ([| B; B; B |] | [| B; B; B; _ |])) when not alpha ->
+      set_const KCSEL_K1_B
+  | Select (Var_ref K2, ([| B; B; B |] | [| B; B; B; _ |])) when not alpha ->
+      set_const KCSEL_K2_B
+  | Select (Var_ref K3, ([| B; B; B |] | [| B; B; B; _ |])) when not alpha ->
+      set_const KCSEL_K3_B
+  | Select (Var_ref K0, ([| A; A; A |] | [| A; A; A; _ |])) when not alpha ->
+      set_const KCSEL_K0_A
+  | Select (Var_ref K1, ([| A; A; A |] | [| A; A; A; _ |])) when not alpha ->
+      set_const KCSEL_K1_A
+  | Select (Var_ref K2, ([| A; A; A |] | [| A; A; A; _ |])) when not alpha ->
+      set_const KCSEL_K2_A
+  | Select (Var_ref K3, ([| A; A; A |] | [| A; A; A; _ |])) when not alpha ->
+      set_const KCSEL_K3_A
+  | Select (Var_ref K0, ([| R |] | [| _; _; _; R |])) when alpha ->
+      set_const KCSEL_K0_R
+  | Select (Var_ref K1, ([| R |] | [| _; _; _; R |])) when alpha ->
+      set_const KCSEL_K1_R
+  | Select (Var_ref K2, ([| R |] | [| _; _; _; R |])) when alpha ->
+      set_const KCSEL_K2_R
+  | Select (Var_ref K3, ([| R |] | [| _; _; _; R |])) when alpha ->
+      set_const KCSEL_K3_R
+  | Select (Var_ref K0, ([| G |] | [| _; _; _; G |])) when alpha ->
+      set_const KCSEL_K0_G
+  | Select (Var_ref K1, ([| G |] | [| _; _; _; G |])) when alpha ->
+      set_const KCSEL_K1_G
+  | Select (Var_ref K2, ([| G |] | [| _; _; _; G |])) when alpha ->
+      set_const KCSEL_K2_G
+  | Select (Var_ref K3, ([| G |] | [| _; _; _; G |])) when alpha ->
+      set_const KCSEL_K3_G
+  | Select (Var_ref K0, ([| B |] | [| _; _; _; B |])) when alpha ->
+      set_const KCSEL_K0_B
+  | Select (Var_ref K1, ([| B |] | [| _; _; _; B |])) when alpha ->
+      set_const KCSEL_K1_B
+  | Select (Var_ref K2, ([| B |] | [| _; _; _; B |])) when alpha ->
+      set_const KCSEL_K2_B
+  | Select (Var_ref K3, ([| B |] | [| _; _; _; B |])) when alpha ->
+      set_const KCSEL_K3_B
+  | Select (Var_ref K0, ([| A |] | [| _; _; _; A |])) when alpha ->
+      set_const KCSEL_K0_A
+  | Select (Var_ref K1, ([| A |] | [| _; _; _; A |])) when alpha ->
+      set_const KCSEL_K1_A
+  | Select (Var_ref K2, ([| A |] | [| _; _; _; A |])) when alpha ->
+      set_const KCSEL_K2_A
+  | Select (Var_ref K3, ([| A |] | [| _; _; _; A |])) when alpha ->
+      set_const KCSEL_K3_A
   | x -> x in
   let expr' = map_expr rewrite_fn expr in
   expr', !which_const
@@ -874,13 +929,14 @@ let rewrite_ternary_expr = function
    the blend part of the expression, but the blend expression is only
    calculated to unsigned 8-bit precision.  *)
 let rewrite_accumulate_expr acc_child = function
-    Plus (S10 (Var_ref _ | Int _ | Float _ as a), b)
+    Plus (S10 (Var_ref _ | Int _ | Float _ | Select _ as a), b)
       when valid_tev_input a ->
       Plus (a, acc_child b)
-  | Minus (S10 (Var_ref _ | Int _ | Float _ as a), b)
+  | Minus (S10 (Var_ref _ | Int _ | Float _ | Select _ as a), b)
       when valid_tev_input a ->
       Minus (a, acc_child b)
-  | S10 (Var_ref _ | Int _ | Float _ as item) when valid_tev_input item ->
+  | S10 (Var_ref _ | Int _ | Float _ | Select _ as item)
+    when valid_tev_input item ->
       Plus (item, acc_child (Int 0l))
   | Plus ((Var_ref _ | Int _ | Float _ as a), b) when valid_tev_input a ->
       Plus (a, acc_child b)
