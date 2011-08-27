@@ -1,0 +1,7 @@
+stage 0:
+  tev.a = texmap0[texcoord0].a;
+
+# ??? What should the syntax for this look like? Probably not like this.
+finally:
+  if (tev.a > 30 && tev.a < 70)
+    discard;
