@@ -1,0 +1,2 @@
+stage 0:
+  tev = clamp ((1 - tev) * 2);

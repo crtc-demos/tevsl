@@ -395,10 +395,10 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_alpha_select = None;
 	  ind_tex_coordscale = None
         } in
-      (* !!! We need a texcoord which is unused, since collisions mean that
-         texcoords get scaled incorrectly.  But choosing 7 means that we'll
-	 calculate all the intervening texcoords!  That's not very good.  *)
-      7, ind_info
+      (* We need a texcoord which is unused, since collisions mean that
+         texcoords get scaled incorrectly.  We don't know which texcoord we can
+	 use yet, so defer the decision until later.  *)
+      -1, ind_info
   | Mult (Matmul (D_indmtx (st, Texcoord from_coord), tm_bias_or_not),
 	  Indscale is) ->
       let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
@@ -1059,10 +1059,21 @@ let string_of_expression expr =
   scan expr;
   Buffer.contents b
 
+type ztex_fmt = Z8 | Z16 | Z24x8
+
+type ztex_operation = Ztex_add | Ztex_replace
+
+type ztex_info = {
+  ztex_fmt : ztex_fmt;
+  ztex_offset : int;
+  ztex_operation : ztex_operation;
+  ztex_texmap_texc : int * int
+}
+
 type 'ac stage_info = {
   stage_operation : 'ac tev;
   const_usage : const_setting option;
-  texmap_texc : (int * int) option;
+  mutable texmap_texc : (int * int) option;
   indirect : indirect_info option;
   colchan: var_param option
 }
@@ -1072,7 +1083,7 @@ type 'ac stage_info = {
    automatically by tevsl.  *)
 
 type tex_info = {
-  ind_dir_texcoord : int;
+  mutable ind_dir_texcoord : int;
   mutable ind_dir_texmap : int option;
   mutable ind_dir_nullified : bool
 }
@@ -1082,6 +1093,7 @@ type stage_col_alpha_parts = {
   mutable ind_direct_tex_part : tex_info option;
   mutable colour_part : cvar_setting stage_info option;
   mutable alpha_part : avar_setting stage_info option;
+  mutable ztex_part : ztex_info option
 }
 
 let parse_channel c =
@@ -1220,6 +1232,58 @@ let compile_expr stage orig_expr swiz ~alpha ac_var_of_expr =
 		     (string_of_expression orig_expr);
       raise (Can't_match_stage stage)
 
+let zfmt_of_bits = function
+    8 -> Z8
+  | 16 -> Z16
+  | 24 -> Z24x8
+  | _ -> failwith "Unexpected Z format"
+
+(* Match Z-texture expression of form:
+
+   z = texmapM:fmt[texcoordN];
+   z = texmapM:fmt[texcoornN] + cst;
+   z = z + texmapM:fmt[texcoordN];
+   z = z + texmapM:fmt[texcoordN] + cst;  *)
+
+let compile_z_texture stage = function
+    Zbits (n, Texmap (tm, Texcoord tc)) ->
+      {
+        ztex_fmt = zfmt_of_bits n;
+        ztex_offset = 0;
+	ztex_operation = Ztex_replace;
+	ztex_texmap_texc = tm, tc
+      }
+  | Plus (Zbits (n, Texmap (tm, Texcoord tc)), Int cst)
+  | Plus (Int cst, Zbits (n, Texmap (tm, Texcoord tc))) ->
+      {
+        ztex_fmt = zfmt_of_bits n;
+        ztex_offset = Int32.to_int cst;
+	ztex_operation = Ztex_replace;
+	ztex_texmap_texc = tm, tc
+      }
+  | Plus (Z, Zbits (n, Texmap (tm, Texcoord tc)))
+  | Plus (Zbits (n, Texmap (tm, Texcoord tc)), Z) ->
+      {
+        ztex_fmt = zfmt_of_bits n;
+        ztex_offset = 0;
+	ztex_operation = Ztex_add;
+	ztex_texmap_texc = tm, tc
+      }
+  | Plus (Z, Plus (Zbits (n, Texmap (tm, Texcoord tc)), Int cst))
+  | Plus (Z, Plus (Int cst, Zbits (n, Texmap (tm, Texcoord tc))))
+  | Plus (Plus (Z, Zbits (n, Texmap (tm, Texcoord tc))), Int cst)
+  | Plus (Plus (Z, Int cst), Zbits (n, Texmap (tm, Texcoord tc))) ->
+      {
+        ztex_fmt = zfmt_of_bits n;
+        ztex_offset = Int32.to_int cst;
+	ztex_operation = Ztex_add;
+	ztex_texmap_texc = tm, tc
+      }
+  | e ->
+      Printf.fprintf stderr "Can't match Z-texture expression: '%s'\n"
+		     (string_of_expression e);
+      raise (Can't_match_stage stage)
+
 let combine_tev_orders col_order alpha_order =
   let combined_colchan =
     match col_order.colchan, alpha_order.colchan with
@@ -1248,7 +1312,7 @@ let array_of_stages stage_defs swiz_arr ns =
     Array.init ns
       (fun _ ->
         { ind_texc_part = None; ind_direct_tex_part = None; colour_part = None;
-	  alpha_part = None }) in
+	  alpha_part = None; ztex_part = None }) in
   List.iter
     (fun (sn, stage_exprs) ->
       try
@@ -1282,8 +1346,8 @@ let array_of_stages stage_defs swiz_arr ns =
 		  <- Some { ind_dir_texcoord = plain_texcoord;
 			    ind_dir_texmap = None; ind_dir_nullified = false }
 	    | Assign (Z_dst, [||], e) ->
-		Printf.fprintf stderr
-		  "Z expressions not implemented, ignoring for now!\n"
+	        let ztex_info = compile_z_texture sn e in
+		arr.(sn).ztex_part <- Some ztex_info
 	    | _ -> failwith "Bad stage expression")
 	stage_exprs
       with
@@ -1342,6 +1406,11 @@ let max_colour_and_texcoord_channels stage_arr =
         None -> ()
       | Some dp ->
           bump_texchans (Some (0, dp.ind_dir_texcoord))
+      end;
+      begin match stage.ztex_part with
+        None -> ()
+      | Some zp ->
+          bump_texchans (Some zp.ztex_texmap_texc)
       end)
     stage_arr;
   !colchans, !texchans
@@ -1599,14 +1668,60 @@ let fill_missing_indirect_lookups stage_arr =
     end
   done
 
-(*let check_ind_part ipo ind =
-  match ipo with
-    None -> ()
-  | Some cp ->
-      begin match cp.indirect with
-	None -> ()
-      | Some ci -> ignore (merge_indirect ci ind)
-      end*)
+exception No_free_texcoord
+
+(* Texture coordinates might have been omitted for the "direct" texcoord part
+   of an indirect lookup.  We don't really care about which texcoord we use in
+   that case, but it can't be one we're using for something else, since that
+   messes up the hardware's automatic scaling.
+   Choose the texcoord beyond the last one we're actually calculating.  This
+   can fail if we are using all eight texcoords for something else!  *)
+
+let fill_missing_texcoords stage_arr max_used_texc =
+  let check_texc () =
+    if max_used_texc == 8 then raise No_free_texcoord in
+  for i = 0 to Array.length stage_arr - 1 do
+    begin match stage_arr.(i).ind_direct_tex_part with
+      Some idt ->
+        if idt.ind_dir_texcoord == -1 then begin
+	  check_texc ();
+	  if !debug then
+	    Printf.fprintf stderr
+	      "Filling direct texcoord %d for indirect lookup at stage %d\n"
+	      max_used_texc i;
+	  idt.ind_dir_texcoord <- max_used_texc
+	end
+    | None -> ()
+    end;
+    begin match stage_arr.(i).colour_part with
+      Some cp ->
+        begin match cp.texmap_texc with
+	  Some (tm, -1) ->
+	    check_texc ();
+	    if !debug then
+	      Printf.fprintf stderr
+	        "Filling direct texcoord %d for colour part at stage %d\n"
+		max_used_texc i;
+	    cp.texmap_texc <- Some (tm, max_used_texc)
+	| _ -> ()
+	end
+     | None -> ()
+     end;
+    begin match stage_arr.(i).alpha_part with
+      Some ap ->
+        begin match ap.texmap_texc with
+	  Some (tm, -1) ->
+	    check_texc ();
+	    if !debug then
+	      Printf.fprintf stderr
+	        "Filling direct texcoord %d for alpha part at stage %d\n"
+		max_used_texc i;
+	    ap.texmap_texc <- Some (tm, max_used_texc)
+	| _ -> ()
+	end
+     | None -> ()
+     end
+  done
 
 let gather_indirect_lookups stage_arr =
   let ind_luts = ref [] in
@@ -1981,6 +2096,25 @@ let print_indirect_setup oc stagenum ind_lookups ind_part =
 	(string_of_gx_bool ind.ind_tex_unmodified_lod)
 	(string_of_alpha_select ind.ind_tex_alpha_select)
 
+let string_of_ztex_operation = function
+    Ztex_add -> "GX_ZT_ADD"
+  | Ztex_replace -> "GX_ZT_REPLACE"
+
+let string_of_ztex_format = function
+    Z8 -> "GX_TF_Z8"
+  | Z16 -> "GX_TF_Z16"
+  | Z24x8 -> "GX_TF_Z24X8"
+
+let print_ztex_setup oc ztex =
+  Printf.fprintf oc
+    "GX_SetZTexture (%s, %s, %d);\n"
+    (string_of_ztex_operation ztex.ztex_operation)
+    (string_of_ztex_format ztex.ztex_fmt)
+    ztex.ztex_offset
+
+let print_disable_ztex oc =
+  Printf.fprintf oc "GX_SetZTexture (GX_ZT_DISABLE, GX_TF_I4, 0);\n"
+
 (* From a STAGE (stage_info), AC_TEXMAP ((int * int) option, being the texture
    map and texture coord for the colour/alpha parts) and AC_INDIR_PART
    (indirect_info option), return another (int * int) option -- the "direct"
@@ -2043,12 +2177,14 @@ let _ =
       max_colour_and_texcoord_channels stage_arr in
     print_num_channels outchan num_colchans num_texchans;
     output_char outchan '\n';
+    fill_missing_texcoords stage_arr num_texchans;
     fill_missing_indirect_lookups stage_arr;
     let indirect_lookups = gather_indirect_lookups stage_arr in
     print_swap_tables outchan swap_tables;
     output_char outchan '\n';
     print_indirect_lookups outchan indirect_lookups;
     output_char outchan '\n';
+    let zbuf_before_texturing = ref true in
     for i = 0 to num_stages - 1 do
       let ac_texmap, colchan, ac_indir_part =
 	match stage_arr.(i).colour_part, stage_arr.(i).alpha_part with
@@ -2058,8 +2194,19 @@ let _ =
             let a, b = combine_tev_orders cp ap in
 	    a, b, merge_indirect ap.indirect cp.indirect
 	| None, None -> failwith "Missing tev stage!" in
+      let acz_texmap = begin match stage_arr.(i).ztex_part with
+        Some zpart ->
+	  begin match ac_texmap with
+	    Some _ ->
+	      Printf.fprintf stderr
+	        "TEV expression may not use textures when Z-texturing is being used (at stage %d)\n" i;
+	      exit 1
+	  | None -> Some zpart.ztex_texmap_texc
+	  end
+      | None -> ac_texmap
+      end in
       let texmap, indir_part, nullified =
-	get_direct_and_indirect_tex_parts stage_arr.(i) ac_texmap
+	get_direct_and_indirect_tex_parts stage_arr.(i) acz_texmap
 					  ac_indir_part in
       print_swap_setup outchan i swap_tables swiz_arr.(i).merged_tex_swaps
 		       swiz_arr.(i).merged_ras_swaps;
@@ -2085,8 +2232,24 @@ let _ =
 			  string_of_tev_alpha_input ~alpha:true
       | None -> ()
       end;
+      begin match stage_arr.(i).ztex_part with
+        Some zpart ->
+	  if i <> num_stages - 1 then begin
+	    Printf.fprintf stderr
+	      "Z-texture expression must be at the final stage (is at stage %d)\n" i;
+	    exit 1
+	  end;
+	  print_ztex_setup outchan zpart;
+	  (* Z-texturing means we must do texturing before Z-buffering.  *)
+	  zbuf_before_texturing := false
+      | None ->
+          if i == num_stages - 1 then
+            print_disable_ztex outchan
+      end;
       output_char outchan '\n'
     done;
+    Printf.fprintf outchan "GX_SetZCompLoc (%s);\n"
+      (string_of_gx_bool !zbuf_before_texturing);
     close_out outchan
   with e ->
     (* An error of some sort happened, clean up.  *)

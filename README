@@ -90,25 +90,33 @@ stage 0:
 and you will get the expected result. Beware that this is no computer algebra
 system which can infer the correct form of expression from anything you feed it
 though! Though tevsl makes some attempt to match what you give it, you might
-need to rearrange your formulae manually to make it recognize them properly.
+need to manually rearrange your formulae so that tevsl can recognize them
+properly, even if "mathematically" it should be possible for it to deduce the
+solution itself.
 
-Other features available are as follows.
+Further description of the features available are below.
 
 Value ranges
 ------------
 
 The normal TEV setup functions provide the illusion that colour and alpha values
-fall in the range 0-1, and tevsl follows the same convention.
+fall in the range 0-1, corresponding to 8-bit colour channel values 0 to 255,
+and tevsl follows the same convention.
+
+Where texture coordinates are manipulated explicitly, e.g. by the
+indirect-texture lookup syntax, values typically run from 0 to the actual size
+of the texture (minus one). E.g. a 256x256 texture will use coordinates 0...255.
 
 Clamping
 --------
 
-You can clamp the result of each TEV stage (to 0-1, i.e. the maximum and minimum
-representable values for each of the R,G,B,A colour channels), by writing:
+You can clamp the result of each TEV stage (to 0...1, i.e. the maximum and
+minimum representable values for each of the R,G,B,A colour channels), by
+writing:
 
   tev = clamp (<expr>);
 
-around your expression.
+around your expression. Clamping happens per-channel.
 
 Blending
 --------
@@ -125,8 +133,8 @@ This is similar to the GLSL mix() function: 0 for <amt> gives the value of
 <var1>, 1 for <amt> gives the value of <var2>, and inbetween values linearly
 interpolate between the two. Channels are mixed independently.
 
-Note that using this means the canonical TEV expression can be written more
-concisely as:
+Note that using this function means the canonical TEV expression can be written
+more concisely as:
 
   tev = (<accum> [+/-] mix (<var1>, <var2>, <amt>) + <bias>) * <scale>;
 
@@ -138,14 +146,18 @@ few examples.
 
   tev = tev + chan0;
 
+  tev = tev * chan1;
+
   tev = tev * 2;
   
   tev = tev / 2;
   
+  tev = clamp ((1 - tev) * 2);   (!!! this doesn't work, bug.)
+  
   tev = clamp (chan0.aaa + chan0.rgb);
 
-The last of these introduces a new feature, channel selection, described more
-fully in the following sections.
+The last of these introduces a new feature, channel selection. This is described
+more fully in the following sections.
 
 Separate colour/alpha expressions
 ---------------------------------
@@ -159,14 +171,16 @@ stage 0:
 
 You can't split channels in different groupings from these on the LHS of these
 expressions though: we're limited to what's supported by the TEV unit (and we
-don't support some other things which might be supportable). E.g. this will NOT
-work:
+don't support merging/rearranging expressions setting different channels, even
+when it might be technically possible. E.g. this will NOT work:
 
 stage 0:
   tev.r = chan0.r;
   tev.g = chan0.g;
   tev.b = chan0.b;
   tev.a = chan0.a;
+
+it's not clear how useful such functionality would be.)
 
 If you just write "tev" on the LHS of an expression, then both colour and alpha
 expressions will be defined. In that case you're limited to the subset of
@@ -176,13 +190,16 @@ You can also write all channels explicitly if you wish:
 
   tev.rgba = chan0.rgba;
 
+This has the same meaning as omitting the ".rgba" parts from both the LHS and
+RHS of the expression (if it doesn't, it's a bug!).
+
 Available variables and constants
 ---------------------------------
 
 The following variables and constants are available for use in expressions.
 
   * "tev". Usually used for the output of the previous stage. The last stage
-    MUST send its output to tev.
+    MUST assign its output to tev.
 
   * "cr0", "cr1", "cr2". These may be used on the LHS of RHS of expressions, and
     correspond to the TEV registers which can be used for constant inputs to the
@@ -208,16 +225,18 @@ is in fact separate from the 10 bits, so -1024 to 1023 can be represented). See
 later for more discussion on that subject.
 
   * "texmapN[texcoordM]". This is a regular texture lookup: coordinates
-    "texcoordM" are looked up in texture "texmapN".
-  
-  * "chan0", "chan1". These are the rasterised colour channels 0 and 1 (like
-    "varying" values in GLSL), used for vertex colouring or lighting
-    calculations.
+    "texcoordM" are looked up in texture "texmapN", and an RGB (or A) result is
+    obtained.
+
+  * "chan0", "chan1". These are the rasterised colour channels 0 and 1 (similar
+    to "varying" values in GLSL), used for vertex colouring or the results of
+    lighting calculations.
 
 Both texmap and chan0/chan1 variables may use arbitrary swizzles, which are
-automatically mapped to the TEV's swap tables (there are only four channel
-combinations possible in total, however: tevsl will give an error if you attempt
-to use too many). So you can write any of:
+automatically mapped to the TEV's "swap table" facility (there are only four
+channel combinations possible in total: tevsl will attempt to merge tables
+wherever possible, and will give an error if you attempt to use too many). So
+you can write any of:
 
   tev.rgb = chan0.rgb;
   
@@ -233,7 +252,8 @@ to use too many). So you can write any of:
 
 Even corner cases such as the last are supported, since alpha and colour
 channels can be referred to independently by the colour TEV channels, and both
-are subject to remapping via swap tables.
+are subject to remapping via swap tables (so in that example, alpha would be
+mapped to green, and each of the RGB channels would be mapped to red).
 
 You can use independent swizzles for texture-map lookups and for the rasterised
 colour channels. You can only refer to one of chan0/chan1 in each TEV stage, and
@@ -258,15 +278,16 @@ use swizzles other than those.
   tev.a = k0.g;
 
 For all variables, writing them without a selector infers ".rgb" for colour
-channels, and ".a" for alpha channels.
+channels (in tev.rgb = ... expressions), and ".a" for alpha channels (tev.a =
+...).
 
-Some constants are available:
+Several constants are available:
 
-  * "0", "1", "0.5", "1/8", "2/8", "3/8", etc.. Other constants are available,
-    and may be mapped to either regular constants, or "konstant" constants, as
-    appropriate. You may only have one "konstant" value per colour- or
-    alpha-part of each stage: tevsl will give an error if your expression needs
-    more than that.
+  * "0", "1", "0.5", "1/8", "2/8", "3/8", etc.. These may be mapped to either
+    regular constants, or "konstant" constants, as appropriate. You probably
+    don't normally need to worry about which will be used in a given expression,
+    but you may only have one "konstant" value per colour- or alpha-part of each
+    stage: tevsl will give an error if your expression needs more than that.
 
 Constants are replicated across each channel.
 
@@ -304,15 +325,17 @@ i.e. concatenation expressions are written "the other way round" from selection
 expressions (using .rgb syntax). This shouldn't really be relevant unless you're
 running short on swap tables, though.
 
-The "false" arm of the ternary expression must be zero.
+The "false" arm of the ternary expression must be zero (a hardware limitation:
+tevsl is not able to perform much rewriting on these expressions).
 
 Signed 10-bit values
 --------------------
 
 Tevsl usually makes no distinction between unsigned 8-bit values and signed
-10-bit values (it could try harder to DTRT actually, although there would still
-be ambiguous cases). If the data type is important, you should write an
-annotation against that variable:
+10-bit values (it could try harder to do the right thing actually, although
+there would still be ambiguous cases). If the data type is important, e.g. you
+are accumulating a value over several stages, you should write an annotation
+against the accumulation variable in question:
 
   tev = (tev:s10) + cr1;
 
@@ -332,8 +355,9 @@ A simple form is as follows:
 
 "indmtx0" and "indscale0" here refer to the indirect matrix and scale set by the
 GX_SetIndTexMatrix API. This expression will look up a texel from
-texmap1[texcoord0], matrix-multiply GX_ITM_0 with it, then scale each component
-of the result.
+texmap1[texcoord0], matrix-multiply GX_ITM_0 (indmtx0 in the above expression)
+with it, then scale each component of the result (indscale0). The scale number
+you use must be equal to the matrix number (a hardware limitation).
 
 You can also use a bias expression:
 
@@ -343,12 +367,20 @@ bias can be, e.g.:
 
   vec3 (-128, -128, 0)
 
-where the values can each be either -128 or 0. (Other biases are used under
-certain circumstances, but those are not yet implemented.)
+where the values can each be either -128 or 0 per-channel. (Other biases are
+used under certain circumstances, but those are not yet implemented.)
+
+This is used to map colour values (which are read from the texture as 0...255)
+to signed values -128...127. The indirect matrix and scale should map these
+texture coordinates so that they match the scale of the regular texture (texmapN
+above) -- unlike other texture lookups, coordinates are not automatically scaled
+from 0...1 to the texture size.
 
 You can add a regular texcoord to an indirectly looked-up texcoord:
 
   tev = texmap0[texcoord1 + indmtx0 ** texmap1[texcoord0] * indscale0];
+
+(texcoord1 will be automatically scaled to texmap0's size as usual.)
 
 Or you can use wrapping on the regular texture using a "modulus" operator:
 
@@ -363,6 +395,10 @@ and you can add to the indirect coordinate calculated by the previous stage
 (only) by writing:
 
   itexcoord = itexcoord + indmtx0 ** texmap1[texcoord0] * indscale0;
+
+This technique can be used over multiple stages to accumulate a 2D (s,t)
+texture-coordinate result before performing a final look-up in a regular texture
+(which is the only thing you can do with the result).
 
 An implementation detail: when you use this syntax, tevsl takes care of
 inserting "GX_TEXMAP_DISABLE" for the appropriate GX_SetTevOrder command for
@@ -380,12 +416,26 @@ stage 2:
 
 "s_dynmtx" and "t_dynmtx" depend on the texcoord from the "regular" texture
 lookup for the stage, so are written using function-like syntax with that
-texcoord as an argument.
+texcoord as an argument. You can still add the same texcoord independently in
+the same stage, if you wish (though the ability to do that might not be useful).
 
 Tevsl automatically infers texmap and texcoord numbers to use for some of the
-above usage scenarios. It might get it wrong sometimes...
+above usage scenarios, in an attempt to avoid extraneous details in the input
+language. That code is quite experimental though, so beware that it might break
+under some circumstances.
+
+Recognition of indirect texture expressions is a little more strict than regular
+TEV expressions, in terms of the order in which you must write terms, etc.. This
+is probably a bug, and may be fixed in due course.
 
 Z textures
+----------
+
+You can use Z-texturing by writing, e.g.:
+
+  z = <z + >texmapM:fmt[texcoordN]< + offset>;
+
+Alpha test
 ----------
 
 TBD.
@@ -411,16 +461,18 @@ Using tevsl frees you of the need to call any of the following APIs manually:
   * GX_SetTevAlphaOp
   * GX_SetTevKColorSel
   * GX_SetTevKAlphaSel
-
-Soon:
-
   * GX_SetZMode
   * GX_SetZTexture
-  * GX_SetZCompLoc (maybe?)
+  * GX_SetZCompLoc (set to true, apart from when using Z texturing.)
 
 Bugs & drawbacks
 ----------------
 
-Many and varied! Most error detection and reporting is nonexistent or poor. TEV
-descriptions are very static, which might limit the way effects can be combined
-or altered at runtime.
+Many and varied! Most error detection and reporting is nonexistent or poor.
+Compiled TEV descriptions are completely static, which might limit the way
+effects can be combined or altered at runtime.
+
+Tevsl works by tree rewriting, and does not have a type system or any kind of
+understanding of the expressions it is manipulating. This might occasionally
+cause it to do unexpected or incorrect things, particularly for meaningless
+inputs.
