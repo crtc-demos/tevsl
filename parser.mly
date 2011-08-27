@@ -4,7 +4,7 @@
 
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
-%token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC3 ITEXCOORD Z
+%token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC2 VEC3 ITEXCOORD Z
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE ZBITS
@@ -98,6 +98,8 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| MIX LPAREN a = rhs_expr COMMA b = rhs_expr COMMA
 	  c = rhs_expr RPAREN
 					{ Expr.Mix (a, b, c) }
+	| VEC2 LPAREN a = rhs_expr COMMA b = rhs_expr RPAREN
+					{ Expr.Vec2 (a, b) }
 	| VEC3 LPAREN a = rhs_expr COMMA b = rhs_expr COMMA
 	  c = rhs_expr RPAREN
 					{ Expr.Vec3 (a, b, c) }

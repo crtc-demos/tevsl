@@ -75,6 +75,7 @@ let map_expr func expr =
     | Matmul (a, b) -> Matmul (scan a, scan b)
     | Divide (a, b) -> Divide (scan a, scan b)
     | Modulus (a, b) -> Modulus (scan a, scan b)
+    | Vec2 (a, b) -> Vec2 (scan a, scan b)
     | Vec3 (a, b, c) -> Vec3 (scan a, scan b, scan c)
     | S10 a -> S10 (scan a)
     | Neg a -> Neg (scan a)
@@ -300,7 +301,8 @@ exception Unrecognized_indirect_texcoord_part of string * expr
 
 let match_tc_maybe_modulus = function
     Texcoord tc -> tc, None
-  | Modulus (Texcoord tc, Int m) -> tc, Some m
+  | Modulus (Texcoord tc, Vec2 (Int m, Int n)) -> tc, Some (m, n)
+  | Modulus (Texcoord tc, Int m) -> tc, Some (m, m)
   | x -> raise (Unrecognized_indirect_texcoord_part ("texcoord", x))
 
 let rec plain_float = function
@@ -333,6 +335,14 @@ exception Conflicting_texcoords of int * int
 let mix_texcoord a b =
   if a = b then a else raise (Conflicting_texcoords (a, b))
 
+let texc_s = function
+    Some (s, _) -> Some s
+  | None -> None
+
+let texc_t = function
+    Some (_, t) -> Some t
+  | None -> None
+
 let rec rewrite_indirect_texcoord = function
     Plus ((Texcoord _ | Modulus _ as tc_modulus_or_not),
 	  Mult (Matmul (Indmtx im, tm_bias_or_not),
@@ -347,8 +357,8 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_bias = bias;
 	  ind_tex_matrix = matrix_of_staticmtx im;
 	  ind_tex_scale = is;
-	  ind_tex_wrap_s = modu;
-	  ind_tex_wrap_t = modu;
+	  ind_tex_wrap_s = texc_s modu;
+	  ind_tex_wrap_t = texc_t modu;
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
@@ -369,8 +379,8 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_bias = bias;
 	  ind_tex_matrix = matrix_of_dynmtx st;
 	  ind_tex_scale = is;
-	  ind_tex_wrap_s = modu;
-	  ind_tex_wrap_t = modu;
+	  ind_tex_wrap_s = texc_s modu;
+	  ind_tex_wrap_t = texc_t modu;
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
@@ -432,8 +442,8 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_bias = [| 0.0; 0.0; 0.0 |];
 	  ind_tex_matrix = T_no_matrix;
 	  ind_tex_scale = -1;
-	  ind_tex_wrap_s = modu;
-	  ind_tex_wrap_t = modu;
+	  ind_tex_wrap_s = texc_s modu;
+	  ind_tex_wrap_t = texc_t modu;
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
@@ -1002,6 +1012,9 @@ let string_of_expression expr =
   | Mix (x, y, z) ->
       Buffer.add_string b "mix("; scan x; Buffer.add_char b ','; scan y;
       Buffer.add_char b ','; scan z; Buffer.add_char b ')'
+  | Vec2 (x, y) ->
+      Buffer.add_string b "vec2("; scan x; Buffer.add_char b ','; scan y;
+      Buffer.add_char b ')'
   | Vec3 (x, y, z) ->
       Buffer.add_string b "vec3("; scan x; Buffer.add_char b ','; scan y;
       Buffer.add_char b ','; scan z; Buffer.add_char b ')'

@@ -93,6 +93,7 @@ rule token = parse
   | "?"		    { QUESTIONMARK }
   | "clamp"	    { CLAMP }
   | "mix"	    { MIX }
+  | "vec2"	    { VEC2 }
   | "vec3"	    { VEC3 }
   | "s10"	    { S10 }
   | "z8"	    { ZBITS 8 }
