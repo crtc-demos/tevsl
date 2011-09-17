@@ -380,11 +380,18 @@ You can add a regular texcoord to an indirectly looked-up texcoord:
 
   tev = texmap0[texcoord1 + indmtx0 ** texmap1[texcoord0] * indscale0];
 
-(texcoord1 will be automatically scaled to texmap0's size as usual.)
+The texture lookup will then use the resulting texture coordinates from this
+calculation. Texcoord1 will be automatically scaled to texmap0's size before the
+addition as for normal texture lookups.
 
-Or you can use wrapping on the regular texture using a "modulus" operator:
+You can also use wrapping on the regular texture using a "modulus" operator:
 
   tev = texmap0[(texcoord1 % 32) + indmtx0 ** texmap1[texcoord0] * indscale0];
+
+The right-hand side of the modulus operator can be an integer (as written), or a
+two-element vector to use different moduli for the S and T coordinates:
+
+  tev = texmap0[(texcoord1 % vec2 (32, 16)) + indmtx0 ...];
 
 You can perform indirect texture lookups without also doing a regular lookup by
 writing:
@@ -392,7 +399,8 @@ writing:
   itexcoord = indmtx0 ** texmap1[texcoord0] * indscale0;
 
 and you can add to the indirect coordinate calculated by the previous stage
-(only) by writing:
+(only -- i.e. no inbetween stages doing other operations are permitted) by
+writing:
 
   itexcoord = itexcoord + indmtx0 ** texmap1[texcoord0] * indscale0;
 
