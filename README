@@ -27,19 +27,22 @@ example basic texture mapping can be achieved by writing the following:
 stage 0:
   tev = texmap0[texcoord0];
 
-This can be compiled as follows:
+The effect of this is to look up texture coordinates specified by texcoord0 in
+the texture map texmap0, and assign the RGBA results to "tev". This can be
+compiled as follows:
 
 $ tevsl basic-texture.tev -o basic-texture.inc
 
-and then in your C program:
+and then in your C program, you write something like:
 
 void setup_basic_texture_mapping (void)
 {
 #include "basic-texture.inc"
 }
 
-Ideally, you should set up Makefile rules so that .inc files are automatically
-regenerated when you edit the corresponding .tev file.
+Ideally, you should set up Makefile (or whatever other build system you use)
+rules so that .inc files are automatically regenerated when you edit the
+corresponding .tev file.
 
 Tevsl sets up many of the parameters concerning TEV configuration, greatly
 reducing the need for you to keep track of the TEV state yourself. See later
@@ -59,11 +62,12 @@ stage 1:
 
 (The need to manually number stages may disappear at some point.)
 
-The left-hand side of each assignment corresponds to the output of the TEV
-environment for each stage, and the RHS of the assignment corresponds to the
-inputs to that stage and processing which is done on those inputs. You should
-only write one "tev =" expression per stage, though that's not the whole story:
-see below for more.
+The left-hand side of each assignment corresponds to the output of the TEV unit
+for each stage, and the RHS of the assignment corresponds to the inputs to that
+stage and the processing which is done on those inputs. You should only assign
+to each colour/alpha channel once per stage: "tev =" write to all four
+simultaneously, though you can also split the colour/alpha parts and perform
+different operations for each (see below).
 
 Though several kinds of expression are supported, note that tevsl can't
 magically add programmability to Flipper/Hollywood chip: so, you're quite
@@ -91,8 +95,8 @@ and you will get the expected result. Beware that this is no computer algebra
 system which can infer the correct form of expression from anything you feed it
 though! Though tevsl makes some attempt to match what you give it, you might
 need to manually rearrange your formulae so that tevsl can recognize them
-properly, even if "mathematically" it should be possible for it to deduce the
-solution itself.
+properly, even if mathematically speaking it should be possible for it to deduce
+the solution for a particular expression itself.
 
 Further description of the features available are below.
 
@@ -116,7 +120,8 @@ writing:
 
   tev = clamp (<expr>);
 
-around your expression. Clamping happens per-channel.
+around your expression. Channels are clamped independently, and you can clamp
+colour channels but not alpha channels, or vice versa.
 
 Blending
 --------
@@ -125,7 +130,7 @@ A simplified form of syntax is provided for writing blending equations:
 
   tev = mix (<var1>, <var2>, <amt>);
 
-This maps directly to:
+This is internally rewritten to:
 
   tev = (1 - <amt>) * <var1> + <amt> * <var2>;
 
@@ -198,16 +203,19 @@ Available variables and constants
 
 The following variables and constants are available for use in expressions.
 
-  * "tev". Usually used for the output of the previous stage. The last stage
-    MUST assign its output to tev.
+  * "tev". This may be used on the LHS or RHS of expressions, and is usually
+    used to pass intermediate values between stages. The last stage MUST assign
+    its output to tev.
 
   * "cr0", "cr1", "cr2". These may be used on the LHS of RHS of expressions, and
     correspond to the TEV registers which can be used for constant inputs to the
     TEV, or for intermediate results. These map to GX_TEVREG{0,1,2} on the LHS
     of expressions, or GX_CC_C{0,1,2} etc. on the RHS of expressions. When used
-    as constants, these are set using GX_SetTevColor.
+    as constants, these are set using GX_SetTevColor. (You must take care not to
+    use a given register as *both* a constant and an intermediate value: that
+    won't work.)
 
-These variables can be used with channel selectors:
+These variables can be used with channel selectors,
 
 For colour channels, e.g.
 
@@ -282,7 +290,7 @@ For all variables, writing them without a selector infers ".rgb" for colour
 channels (in tev.rgb = ... expressions), and ".a" for alpha channels (tev.a =
 ...).
 
-Several true scalar constants are available:
+Several scalar constants are available:
 
   * "0", "1", "0.5", "1/8", "2/8", "3/8", etc.. These may be mapped to either
     regular constants, or "konstant" constants, as appropriate. You probably
@@ -290,7 +298,7 @@ Several true scalar constants are available:
     but you may only have one "konstant" value per colour- or alpha-part of each
     stage: tevsl will give an error if your expression needs more than that.
 
-Constants are replicated across each channel.
+These constants are replicated across each channel.
 
 Ternary (conditional) expressions
 ---------------------------------
@@ -383,11 +391,12 @@ You can add a regular texcoord to an indirectly looked-up texcoord:
 
   tev = texmap0[texcoord1 + indmtx0 ** texmap1[texcoord0] * indscale0];
 
-The texture lookup will then use the resulting texture coordinates from this
-calculation. Texcoord1 will be automatically scaled to texmap0's size before the
-addition as for normal texture lookups.
+The texture lookup (in texmap0 in the example) will then use the resulting
+texture coordinates from this calculation. Texcoord1 will be automatically
+scaled to texmap0's size before the addition as for normal texture lookups.
 
-You can also use wrapping on the regular texture using a "modulus" operator:
+You can also use wrapping on the regular texture coordinate using a "modulus"
+(%) operator:
 
   tev = texmap0[(texcoord1 % 32) + indmtx0 ** texmap1[texcoord0] * indscale0];
 
@@ -396,8 +405,9 @@ two-element vector to use different moduli for the S and T coordinates:
 
   tev = texmap0[(texcoord1 % vec2 (32, 16)) + indmtx0 ...];
 
-You can perform indirect texture lookups without also doing a regular lookup by
-writing:
+It is sometimes necessary (e.g. for "ST" bump mapping) to calculate an indirect
+texture coordinate over several TEV stages. This is supported by tevsl. You can
+perform indirect texture lookups without also doing a regular lookup by writing:
 
   itexcoord = indmtx0 ** texmap1[texcoord0] * indscale0;
 
@@ -477,7 +487,8 @@ This should be written after the last stage in your input file, since that is
 when the alpha-test logically takes place (though the placement of the "finally"
 stage isn't actually enforced at present, which is a bug). The hardware supports
 two comparisons (as written above), whose results may be combined in several
-ways.
+ways to determine the final true/false (render fragment/do not render fragment)
+result.
 
 You can write any of the following for the comparison operators, which follow
 their usual meaning:
@@ -490,8 +501,8 @@ And you can combine two comparisons using the operators:
 
 where "^" means exclusive-OR (first condition or second condition true, but not
 both), and "==" means equal or not-exclusive-OR (first and second condition both
-true, or both false). The "&&" and "||" are logical-AND and logical-OR, as per
-usual C semantics.
+true, or both false). The "&&" and "||" operators mean logical-AND and
+logical-OR, as per usual C semantics.
 
 You may also write a single comparison, e.g.:
 
@@ -503,7 +514,8 @@ Then, tevsl will insert a null condition for the second comparison for you.
 You may write C variables (as above, like "$foo") instead of constants in
 alpha-test expressions (see below).
 
-Using alpha test automatically configures Z-buffering to occur after texturing.
+Using alpha test automatically configures Z-buffering to occur after texturing
+(a hardware requirement).
 
 Using C variables in expressions
 --------------------------------
@@ -533,7 +545,8 @@ Then, you can vary the threshold by calling this function with a suitable
 argument.
 
 Note that C-variable substitution doesn't work at present for expressions other
-than those mentioned above. Such support may be extended in the future.
+than those mentioned above. Support for use in other types of expression may be
+added in the future, if necessary and feasible.
 
 List of automated APIs
 ----------------------
