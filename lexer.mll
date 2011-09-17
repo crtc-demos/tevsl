@@ -5,6 +5,10 @@
 let intnum = ['0'-'9']+
 let floatnum = intnum "." intnum
 
+let alpha = ['a'-'z' 'A'-'Z' '_']
+
+let cvar = alpha (alpha | ['0'-'9'])*
+
 (* Presume GX_CC_ONE, GX_CC_HALF, GX_CC_KONST, GX_CC_ZERO are written as
    numbers.  *)
 
@@ -67,6 +71,8 @@ rule token = parse
 		    { INDSCALE (int_of_string n) }
   | "stage"	    { STAGE }
   | "itexcoord"     { ITEXCOORD }
+  | "$" (cvar as cvar)
+		    { CVAR cvar }
   | "z"		    { Z }
   | "+"		    { PLUS }
   | "-"		    { MINUS }

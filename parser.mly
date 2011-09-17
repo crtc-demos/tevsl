@@ -8,6 +8,7 @@
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE ZBITS
+%token <string> CVAR
 %token <Expr.ind_matrix> INDMTX
 %token <Expr.dyn_ind_matrix> D_INDMTX
 %token <Expr.var_param> VAR
@@ -75,6 +76,7 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| LPAREN e = rhs_expr RPAREN
 					{ e }
 	| v = VAR 			{ Expr.Var_ref v }
+	| v = CVAR			{ Expr.CVar v }
 	| m = TEXMAP LSQUARE e = rhs_expr RSQUARE
 					{ Expr.Texmap (m, e) }
 	| m = TEXMAP COLON b = ZBITS LSQUARE e = rhs_expr RSQUARE

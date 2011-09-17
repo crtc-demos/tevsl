@@ -99,6 +99,7 @@ let map_expr func expr =
     | Int i -> Int i
     | Float f -> Float f
     | Var_ref vp -> Var_ref vp
+    | CVar cv -> CVar cv
     | Protect e -> e in
   scan expr
 
@@ -1063,6 +1064,9 @@ let string_of_expression expr =
   | Matmul (a, b) -> add_binop a " ** " b
   | Modulus (a, b) -> add_binop a " % " b
   | Var_ref r -> Buffer.add_string b (string_of_var_param r)
+  | CVar c ->
+      Buffer.add_char b '$';
+      Buffer.add_string b c
   | Neg a -> Buffer.add_string b "-("; scan a; Buffer.add_char b ')'
   | Clamp a -> Buffer.add_string b "clamp("; scan a; Buffer.add_char b ')'
   | Mix (x, y, z) ->
@@ -1132,9 +1136,13 @@ type ztex_fmt = Z8 | Z16 | Z24x8
 
 type ztex_operation = Ztex_add | Ztex_replace
 
+type int_cst_or_cvar =
+    Int_cst of int
+  | Int_cvar of string
+
 type ztex_info = {
   ztex_fmt : ztex_fmt;
-  ztex_offset : int;
+  ztex_offset : int_cst_or_cvar;
   ztex_operation : ztex_operation;
   ztex_texmap_texc : int * int
 }
@@ -1307,6 +1315,13 @@ let zfmt_of_bits = function
   | 24 -> Z24x8
   | _ -> failwith "Unexpected Z format"
 
+exception Not_int_cst_or_cvar
+
+let cv_of_expr = function
+    Int x -> Int_cst (Int32.to_int x)
+  | CVar c -> Int_cvar c
+  | _ -> raise Not_int_cst_or_cvar
+
 (* Match Z-texture expression of form:
 
    z = texmapM:fmt[texcoordN];
@@ -1318,15 +1333,15 @@ let compile_z_texture stage = function
     Zbits (n, Texmap (tm, Texcoord tc)) ->
       {
         ztex_fmt = zfmt_of_bits n;
-        ztex_offset = 0;
+        ztex_offset = Int_cst 0;
 	ztex_operation = Ztex_replace;
 	ztex_texmap_texc = tm, tc
       }
-  | Plus (Zbits (n, Texmap (tm, Texcoord tc)), Int cst)
-  | Plus (Int cst, Zbits (n, Texmap (tm, Texcoord tc))) ->
+  | Plus (Zbits (n, Texmap (tm, Texcoord tc)), (Int _ | CVar _ as cv))
+  | Plus ((Int _ | CVar _ as cv), Zbits (n, Texmap (tm, Texcoord tc))) ->
       {
         ztex_fmt = zfmt_of_bits n;
-        ztex_offset = Int32.to_int cst;
+        ztex_offset = cv_of_expr cv;
 	ztex_operation = Ztex_replace;
 	ztex_texmap_texc = tm, tc
       }
@@ -1334,17 +1349,18 @@ let compile_z_texture stage = function
   | Plus (Zbits (n, Texmap (tm, Texcoord tc)), Z) ->
       {
         ztex_fmt = zfmt_of_bits n;
-        ztex_offset = 0;
+        ztex_offset = Int_cst 0;
 	ztex_operation = Ztex_add;
 	ztex_texmap_texc = tm, tc
       }
-  | Plus (Z, Plus (Zbits (n, Texmap (tm, Texcoord tc)), Int cst))
-  | Plus (Z, Plus (Int cst, Zbits (n, Texmap (tm, Texcoord tc))))
-  | Plus (Plus (Z, Zbits (n, Texmap (tm, Texcoord tc))), Int cst)
-  | Plus (Plus (Z, Int cst), Zbits (n, Texmap (tm, Texcoord tc))) ->
+  | Plus (Z, Plus (Zbits (n, Texmap (tm, Texcoord tc)), (Int _ | CVar _ as cv)))
+  | Plus (Z, Plus ((Int _ | CVar _ as cv), Zbits (n, Texmap (tm, Texcoord tc))))
+  | Plus (Plus (Z, Zbits (n, Texmap (tm, Texcoord tc))), (Int _ | CVar _ as cv))
+  | Plus (Plus (Z, (Int _ | CVar _ as cv)),
+	  Zbits (n, Texmap (tm, Texcoord tc))) ->
       {
         ztex_fmt = zfmt_of_bits n;
-        ztex_offset = Int32.to_int cst;
+        ztex_offset = cv_of_expr cv;
 	ztex_operation = Ztex_add;
 	ztex_texmap_texc = tm, tc
       }
@@ -2174,12 +2190,16 @@ let string_of_ztex_format = function
   | Z16 -> "GX_TF_Z16"
   | Z24x8 -> "GX_TF_Z24X8"
 
+let string_of_cv = function
+    Int_cst i -> string_of_int i
+  | Int_cvar c -> c
+
 let print_ztex_setup oc ztex =
   Printf.fprintf oc
-    "GX_SetZTexture (%s, %s, %d);\n"
+    "GX_SetZTexture (%s, %s, %s);\n"
     (string_of_ztex_operation ztex.ztex_operation)
     (string_of_ztex_format ztex.ztex_fmt)
-    ztex.ztex_offset
+    (string_of_cv ztex.ztex_offset)
 
 let print_disable_ztex oc =
   Printf.fprintf oc "GX_SetZTexture (GX_ZT_DISABLE, GX_TF_I4, 0);\n"

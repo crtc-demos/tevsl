@@ -29,6 +29,7 @@ type expr =
   | Itexcoord
   | Z
   | Zbits of int * expr
+  | CVar of string
   | Protect of expr  (* Don't map child expr in map_expr.  *)
 
 (* X for "don't care".  *)
