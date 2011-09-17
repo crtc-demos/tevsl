@@ -471,9 +471,10 @@ finally:
   alpha_pass = tev.a > 30 && tev.a < 70;
 
 This should be written after the last stage in your input file, since that is
-when the alpha-test logically takes place (though this isn't actually enforced
-at present, which is a bug). The hardware supports two comparisons, whose
-results may be combined in several ways.
+when the alpha-test logically takes place (though the placement of the "finally"
+stage isn't actually enforced at present, which is a bug). The hardware supports
+two comparisons (as written above), whose results may be combined in several
+ways.
 
 You can write any of the following for the comparison operators, which follow
 their usual meaning:
@@ -486,15 +487,15 @@ And you can combine two comparisons using the operators:
 
 where "^" means exclusive-OR (first condition or second condition true, but not
 both), and "==" means equal or not-exclusive-OR (first and second condition both
-true, or both false).
+true, or both false). The "&&" and "||" are logical-AND and logical-OR, as per
+usual C semantics.
 
 You may also write a single comparison, e.g.:
 
 finally:
   alpha_pass = tev.a > 128;
 
-Then, tevsl will insert an always-true condition for the second comparison for
-you.
+Then, tevsl will insert a null condition for the second comparison for you.
 
 You may write C variables (as above, like "$foo") instead of constants in
 alpha-test expressions (see below).
@@ -506,8 +507,8 @@ Using C variables in expressions
 
 In limited circumstances (Z texturing and alpha-test expressions), you may write
 C variables instead of constants by writing a variable name preceded with a
-dollar sign, e.g. "$variable". This variable is then emitted verbatim in the
-output, so will be captured from the point at which you include the compiled
+dollar sign, e.g. "$variable". This variable name is then emitted verbatim in
+the output, so will be captured from the point at which you include the compiled
 shader ".inc" file.
 
 E.g. for shader code, "texture-holes.tev":
@@ -529,7 +530,7 @@ Then, you can vary the threshold by calling this function with a suitable
 argument.
 
 Note that C-variable substitution doesn't work at present for expressions other
-than those mentioned above. Support may be extended in the future.
+than those mentioned above. Such support may be extended in the future.
 
 List of automated APIs
 ----------------------
