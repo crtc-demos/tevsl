@@ -542,6 +542,10 @@ the need to call any of them explicitly:
   * GX_SetAlphaCompare
   * GX_SetZCompLoc
 
+You can also specify much of the functionality provided by the GX_SetTevInd*
+helper functions (GX_SetTevIndBumpST, etc.) using tevsl expressions, hopefully
+leading to easier-to-understand code.
+
 Bugs & drawbacks
 ----------------
 

@@ -1412,9 +1412,22 @@ let alpha_test_comparison = function
       { acmp_op = Acmp_less; acmp_val = cv_of_expr cv }
   | Cgt (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
       { acmp_op = Acmp_greater; acmp_val = cv_of_expr cv }
+  | Clte (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
+      { acmp_op = Acmp_lequal; acmp_val = cv_of_expr cv }
+  | Cgte (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
+      { acmp_op = Acmp_gequal; acmp_val = cv_of_expr cv }
   | Ceq (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
       { acmp_op = Acmp_equal; acmp_val = cv_of_expr cv }
+  | Cne (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
+      { acmp_op = Acmp_nequal; acmp_val = cv_of_expr cv }
   | x -> raise (Can't_match_alpha_test x)
+
+let valid_alpha_test expr =
+  try
+    ignore (alpha_test_comparison expr);
+    true
+  with Can't_match_alpha_test _ ->
+    false
 
 (* Match alpha test expression of form:
 
@@ -1441,7 +1454,7 @@ let compile_alpha_test = function
 	atest_combine = Acomb_xor;
 	atest_cmp2 = alpha_test_comparison cmp2
       }
-  | Ceq (cmp1, cmp2) ->
+  | Ceq (cmp1, cmp2) when valid_alpha_test cmp1 && valid_alpha_test cmp2 ->
       {
         atest_cmp1 = alpha_test_comparison cmp1;
 	atest_combine = Acomb_xnor;
