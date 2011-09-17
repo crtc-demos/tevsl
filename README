@@ -472,22 +472,29 @@ finally:
 
 This should be written after the last stage in your input file, since that is
 when the alpha-test logically takes place (though this isn't actually enforced
-at present, which is a bug). You can write any of the following for comparisons, which follow their usual meaning:
+at present, which is a bug). The hardware supports two comparisons, whose
+results may be combined in several ways.
+
+You can write any of the following for the comparison operators, which follow
+their usual meaning:
 
   < <= == != => >
 
-You can combine two comparisons using the operators:
+And you can combine two comparisons using the operators:
 
   && || ^ ==
 
 where "^" means exclusive-OR (first condition or second condition true, but not
-both), and "==" means not-exclusive-OR (first and second condition both true, or
-both false).
+both), and "==" means equal or not-exclusive-OR (first and second condition both
+true, or both false).
 
 You may also write a single comparison, e.g.:
 
 finally:
   alpha_pass = tev.a > 128;
+
+Then, tevsl will insert an always-true condition for the second comparison for
+you.
 
 You may write C variables (as above, like "$foo") instead of constants in
 alpha-test expressions (see below).
