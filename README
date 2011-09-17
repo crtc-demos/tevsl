@@ -442,7 +442,11 @@ last). This specifies the format of the Z texture texmapM, since the Z-texture
 setup function needs to know that, and tevsl doesn't otherwise know what the
 format should be.
 
-'offset' is a 24-bit offset which may optionally be added to the Z texture.
+'offset' is a 24-bit offset which may optionally be added to the
+Z texture. As a special case you may write "$foo" here (for any foo
+corresponding to a valid C variable name), and the variable "foo" will be
+emitted verbatim in the output file. This allows injection of different
+values for the offset at runtime.
 
 You can either replace the Z buffer for the fragment in question (z = ...) or
 add to the usual calculated value for the fragment (z = z + ...).
