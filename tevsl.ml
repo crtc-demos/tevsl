@@ -85,8 +85,14 @@ let map_expr func expr =
     | Select (e, lsa) -> Select (scan e, lsa)
     | Concat (e, lsa) -> Concat (scan e, lsa)
     | Ceq (a, b) -> Ceq (scan a, scan b)
+    | Cne (a, b) -> Cne (scan a, scan b)
     | Cgt (a, b) -> Cgt (scan a, scan b)
     | Clt (a, b) -> Clt (scan a, scan b)
+    | Cgte (a, b) -> Cgte (scan a, scan b)
+    | Clte (a, b) -> Clte (scan a, scan b)
+    | Or (a, b) -> Or (scan a, scan b)
+    | Xor (a, b) -> Xor (scan a, scan b)
+    | And (a, b) -> And (scan a, scan b)
     | Ternary (a, b, c) -> Ternary (scan a, scan b, scan c)
     | Texmap (idx, e) -> Texmap (idx, scan e)
     | Texcoord tc -> Texcoord tc
@@ -1041,6 +1047,7 @@ let string_of_destvar = function
   | Tevreg2 -> "tevreg2"
   | Itexc_dst -> "itexcoord"
   | Z_dst -> "z"
+  | Alpha_pass -> "alpha_pass"
 
 let string_of_indmtx = function
     Ind_matrix i -> "indmtx" ^ string_of_int i
@@ -1087,8 +1094,14 @@ let string_of_expression expr =
       Buffer.add_string b "=";
       scan e
   | Ceq (a, b) -> add_binop a " == " b
+  | Cne (a, b) -> add_binop a " != " b
   | Cgt (a, b) -> add_binop a " > " b
   | Clt (a, b) -> add_binop a " < " b
+  | Cgte (a, b) -> add_binop a " >= " b
+  | Clte (a, b) -> add_binop a " <= " b
+  | And (a, b) -> add_binop a " && " b
+  | Or (a, b) -> add_binop a " || " b
+  | Xor (a, b) -> add_binop a " ^ " b
   | Select (e, lsa) ->
       scan e;
       Buffer.add_char b '.';
@@ -1147,6 +1160,22 @@ type ztex_info = {
   ztex_texmap_texc : int * int
 }
 
+type alphatest_combine = Acomb_or | Acomb_and | Acomb_xor | Acomb_xnor
+
+type alphatest_cmp = Acmp_never | Acmp_less | Acmp_equal | Acmp_lequal
+		   | Acmp_greater | Acmp_nequal | Acmp_gequal | Acmp_always
+
+type alphatest_comparison = {
+  acmp_op : alphatest_cmp;
+  acmp_val : int_cst_or_cvar
+}
+
+type alphatest_info = {
+  atest_cmp1 : alphatest_comparison;
+  atest_combine : alphatest_combine;
+  atest_cmp2 : alphatest_comparison
+}
+
 type 'ac stage_info = {
   stage_operation : 'ac tev;
   const_usage : const_setting option;
@@ -1179,7 +1208,10 @@ let parse_channel c =
 
 let num_stages stage_defs =
   List.fold_right
-    (fun (sn, _) acc -> if sn + 1 > acc then sn + 1 else acc)
+    (fun stagetype acc ->
+      match stagetype with
+        Regular_stage (sn, _) -> if sn + 1 > acc then sn + 1 else acc
+      | _ -> acc)
     stage_defs
     0
 
@@ -1213,26 +1245,28 @@ let array_of_swizzles stage_defs ns =
     (fun _ -> { colour_swaps = None; alpha_swaps = None;
 		merged_tex_swaps = None; merged_ras_swaps = None }) in
   List.iter
-    (fun (sn, stage_exprs) ->
-      List.iter
-        (fun stage_expr ->
-	  let stage_expr = default_assign stage_expr in
-            match stage_expr with
-	      Assign (_, [| A |], _) ->
-	        let swiz = swizzle_for_expr stage_expr ~alpha:true in
-		arr.(sn).alpha_swaps <- Some swiz
-	    | Assign (_, [| R; G; B |], _) ->
-	        let swiz = swizzle_for_expr stage_expr ~alpha:false in
-		arr.(sn).colour_swaps <- Some swiz
-	    | Assign (_, [| R; G; B; A |], _) ->
-	        let cswiz = swizzle_for_expr stage_expr ~alpha:false
-		and aswiz = swizzle_for_expr stage_expr ~alpha:true in
-		arr.(sn).alpha_swaps <- Some aswiz;
-		arr.(sn).colour_swaps <- Some cswiz
-	    | Assign (Itexc_dst, [| LS_S; LS_T |], e) -> ()
-	    | Assign (Z_dst, [||], _) -> ()
-	    | _ -> failwith "Bad stage expression")
-	stage_exprs)
+    (function
+	Regular_stage (sn, stage_exprs) ->
+	  List.iter
+            (fun stage_expr ->
+	      let stage_expr = default_assign stage_expr in
+        	match stage_expr with
+		  Assign (_, [| A |], _) ->
+	            let swiz = swizzle_for_expr stage_expr ~alpha:true in
+		    arr.(sn).alpha_swaps <- Some swiz
+		| Assign (_, [| R; G; B |], _) ->
+	            let swiz = swizzle_for_expr stage_expr ~alpha:false in
+		    arr.(sn).colour_swaps <- Some swiz
+		| Assign (_, [| R; G; B; A |], _) ->
+	            let cswiz = swizzle_for_expr stage_expr ~alpha:false
+		    and aswiz = swizzle_for_expr stage_expr ~alpha:true in
+		    arr.(sn).alpha_swaps <- Some aswiz;
+		    arr.(sn).colour_swaps <- Some cswiz
+		| Assign (Itexc_dst, [| LS_S; LS_T |], e) -> ()
+		| Assign (Z_dst, [||], _) -> ()
+		| _ -> failwith "Bad stage expression")
+	    stage_exprs
+      | _ -> ())
     stage_defs;
   arr
 
@@ -1369,6 +1403,61 @@ let compile_z_texture stage = function
 		     (string_of_expression e);
       raise (Can't_match_stage stage)
 
+exception Can't_match_alpha_test of expr
+
+(* There are more of these available!  They can't be parsed yet though.  *)
+
+let alpha_test_comparison = function
+    Clt (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
+      { acmp_op = Acmp_less; acmp_val = cv_of_expr cv }
+  | Cgt (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
+      { acmp_op = Acmp_greater; acmp_val = cv_of_expr cv }
+  | Ceq (Select (Var_ref Tev, [| A |]), (Int _ | CVar _ as cv)) ->
+      { acmp_op = Acmp_equal; acmp_val = cv_of_expr cv }
+  | x -> raise (Can't_match_alpha_test x)
+
+(* Match alpha test expression of form:
+
+   alpha_pass = tev.a CMP val1 COMBINE_OP tev.a CMP val2;
+   alpha_pass = tev.a CMP val1;
+*)
+
+let compile_alpha_test = function
+    Or (cmp1, cmp2) ->
+      {
+        atest_cmp1 = alpha_test_comparison cmp1;
+	atest_combine = Acomb_or;
+	atest_cmp2 = alpha_test_comparison cmp2
+      }
+  | And (cmp1, cmp2) ->
+      {
+        atest_cmp1 = alpha_test_comparison cmp1;
+	atest_combine = Acomb_and;
+	atest_cmp2 = alpha_test_comparison cmp2
+      }
+  | Xor (cmp1, cmp2) ->
+      {
+        atest_cmp1 = alpha_test_comparison cmp1;
+	atest_combine = Acomb_xor;
+	atest_cmp2 = alpha_test_comparison cmp2
+      }
+  | Ceq (cmp1, cmp2) ->
+      {
+        atest_cmp1 = alpha_test_comparison cmp1;
+	atest_combine = Acomb_xnor;
+	atest_cmp2 = alpha_test_comparison cmp2
+      }
+  | cmp ->
+      {
+        atest_cmp1 = alpha_test_comparison cmp;
+	atest_combine = Acomb_or;
+	atest_cmp2 =
+	  {
+	    acmp_op = Acmp_never;
+	    acmp_val = Int_cst 0
+	  }
+      }
+
 let combine_tev_orders col_order alpha_order =
   let combined_colchan =
     match col_order.colchan, alpha_order.colchan with
@@ -1398,59 +1487,70 @@ let array_of_stages stage_defs swiz_arr ns =
       (fun _ ->
         { ind_texc_part = None; ind_direct_tex_part = None; colour_part = None;
 	  alpha_part = None; ztex_part = None }) in
+  let alphatest_part = ref None in
   List.iter
-    (fun (sn, stage_exprs) ->
-      try
-        List.iter
-          (fun stage_expr ->
-            let stage_expr = default_assign stage_expr in
-            match stage_expr with
-	      Assign (_, [| A |], _) ->
-		let comp =
-		  compile_expr sn stage_expr swiz_arr.(sn) ~alpha:true
-			       avar_of_expr in
-		arr.(sn).alpha_part <- Some comp
-	    | Assign (_, [| R; G; B |], _) ->
-		let comp =
-		  compile_expr sn stage_expr swiz_arr.(sn) ~alpha:false
-			       cvar_of_expr in
-		arr.(sn).colour_part <- Some comp
-	    | Assign (_, [| R; G; B; A |], _) ->
-		(* Not entirely sure if it's sensible to allow this.  *)
-		let ccomp = compile_expr sn stage_expr swiz_arr.(sn)
-					 ~alpha:false cvar_of_expr
-		and acomp =
-		  compile_expr sn stage_expr swiz_arr.(sn) ~alpha:true
-			       avar_of_expr in
-		arr.(sn).alpha_part <- Some acomp;
-		arr.(sn).colour_part <- Some ccomp
-	    | Assign (Itexc_dst, [| LS_S; LS_T |], e) ->
-	        let plain_texcoord, tcomp = rewrite_indirect_texcoord e in
-	        arr.(sn).ind_texc_part <- Some tcomp;
-		arr.(sn).ind_direct_tex_part
-		  <- Some { ind_dir_texcoord = plain_texcoord;
-			    ind_dir_texmap = None; ind_dir_nullified = false }
-	    | Assign (Z_dst, [||], e) ->
-	        let ztex_info = compile_z_texture sn e in
-		arr.(sn).ztex_part <- Some ztex_info
-	    | _ -> failwith "Bad stage expression")
-	stage_exprs
-      with
-        ((Bad_avar e) as exc) ->
-          let s = string_of_expression e in
-	  Printf.fprintf stderr "In '%s':\n" s;
-	  raise exc
-      | ((Bad_cvar e) as exc) ->
-          let s = string_of_expression e in
-	  Printf.fprintf stderr "In '%s':\n" s;
-	  raise exc
-      | Unrecognized_indirect_texcoord_part (fn, ex) ->
-          Printf.fprintf stderr
-	    "Unrecognized part in indirect texcoord expression '%s', %s\n"
-	    fn (string_of_expression ex);
-	  exit 1)
+    (function
+	Regular_stage (sn, stage_exprs) ->
+	  begin try
+            List.iter
+              (fun stage_expr ->
+        	let stage_expr = default_assign stage_expr in
+        	match stage_expr with
+		  Assign (_, [| A |], _) ->
+		    let comp =
+		      compile_expr sn stage_expr swiz_arr.(sn) ~alpha:true
+				   avar_of_expr in
+		    arr.(sn).alpha_part <- Some comp
+		| Assign (_, [| R; G; B |], _) ->
+		    let comp =
+		      compile_expr sn stage_expr swiz_arr.(sn) ~alpha:false
+				   cvar_of_expr in
+		    arr.(sn).colour_part <- Some comp
+		| Assign (_, [| R; G; B; A |], _) ->
+		    (* Not entirely sure if it's sensible to allow this.  *)
+		    let ccomp = compile_expr sn stage_expr swiz_arr.(sn)
+					     ~alpha:false cvar_of_expr
+		    and acomp =
+		      compile_expr sn stage_expr swiz_arr.(sn) ~alpha:true
+				   avar_of_expr in
+		    arr.(sn).alpha_part <- Some acomp;
+		    arr.(sn).colour_part <- Some ccomp
+		| Assign (Itexc_dst, [| LS_S; LS_T |], e) ->
+	            let plain_texcoord, tcomp = rewrite_indirect_texcoord e in
+	            arr.(sn).ind_texc_part <- Some tcomp;
+		    arr.(sn).ind_direct_tex_part
+		      <- Some { ind_dir_texcoord = plain_texcoord;
+				ind_dir_texmap = None;
+				ind_dir_nullified = false }
+		| Assign (Z_dst, [||], e) ->
+	            let ztex_info = compile_z_texture sn e in
+		    arr.(sn).ztex_part <- Some ztex_info
+		| _ -> failwith "Bad stage expression")
+	    stage_exprs
+	  with
+            ((Bad_avar e) as exc) ->
+              let s = string_of_expression e in
+	      Printf.fprintf stderr "In '%s':\n" s;
+	      raise exc
+	  | ((Bad_cvar e) as exc) ->
+              let s = string_of_expression e in
+	      Printf.fprintf stderr "In '%s':\n" s;
+	      raise exc
+	  | Unrecognized_indirect_texcoord_part (fn, ex) ->
+              Printf.fprintf stderr
+		"Unrecognized part in indirect texcoord expression '%s', %s\n"
+		fn (string_of_expression ex);
+	      exit 1
+	  end
+      | Alpha_test_stage stage_expr ->
+          begin match stage_expr with
+	    Assign (Alpha_pass, [||], e) ->
+	      let alphatest_info = compile_alpha_test e in
+	      alphatest_part := Some alphatest_info
+	  | _ -> failwith "Bad alpha test expression"
+	  end)
     stage_defs;
-  arr
+  arr, !alphatest_part
 
 let max_colour_and_texcoord_channels stage_arr =
   let colchans = ref 0
@@ -1915,6 +2015,7 @@ let string_of_result = function
   | Tevreg2 -> "GX_TEVREG2"
   | Itexc_dst -> failwith "unexpected itexcoord result"
   | Z_dst -> failwith "unexpected Z result"
+  | Alpha_pass -> failwith "unexpected alpha test result"
 
 let string_of_cmp_op = function
     CMP_r8_gt -> "GX_TEV_COMP_R8_GT"
@@ -2204,6 +2305,34 @@ let print_ztex_setup oc ztex =
 let print_disable_ztex oc =
   Printf.fprintf oc "GX_SetZTexture (GX_ZT_DISABLE, GX_TF_I4, 0);\n"
 
+let string_of_alphatest_comparison = function
+    Acmp_never -> "GX_NEVER"
+  | Acmp_less -> "GX_LESS"
+  | Acmp_equal -> "GX_EQUAL"
+  | Acmp_lequal -> "GX_LEQUAL"
+  | Acmp_greater -> "GX_GREATER"
+  | Acmp_nequal -> "GX_NEQUAL"
+  | Acmp_gequal -> "GX_GEQUAL"
+  | Acmp_always -> "GX_ALWAYS"
+
+let string_of_alphatest_combine = function
+    Acomb_or -> "GX_AOP_OR"
+  | Acomb_and -> "GX_AOP_AND"
+  | Acomb_xor -> "GX_AOP_XOR"
+  | Acomb_xnor -> "GX_AOP_XNOR"
+
+let print_alphatest_setup oc atest =
+  Printf.fprintf oc "GX_SetAlphaCompare (%s, %s, %s, %s, %s);\n"
+    (string_of_alphatest_comparison atest.atest_cmp1.acmp_op)
+    (string_of_cv atest.atest_cmp1.acmp_val)
+    (string_of_alphatest_combine atest.atest_combine)
+    (string_of_alphatest_comparison atest.atest_cmp2.acmp_op)
+    (string_of_cv atest.atest_cmp2.acmp_val)
+
+let print_disable_alphatest oc =
+  Printf.fprintf oc
+    "GX_SetAlphaCompare (GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);\n"
+
 (* From a STAGE (stage_info), AC_TEXMAP ((int * int) option, being the texture
    map and texture coord for the colour/alpha parts) and AC_INDIR_PART
    (indirect_info option), return another (int * int) option -- the "direct"
@@ -2261,7 +2390,8 @@ let _ =
     print_num_stages outchan num_stages;
     let swiz_arr = array_of_swizzles parsed_stages num_stages in
     let swap_tables = gather_swap_tables swiz_arr in
-    let stage_arr = array_of_stages parsed_stages swiz_arr num_stages in
+    let stage_arr, alphatest_part =
+      array_of_stages parsed_stages swiz_arr num_stages in
     let num_colchans, num_texchans =
       max_colour_and_texcoord_channels stage_arr in
     print_num_channels outchan num_colchans num_texchans;
@@ -2337,6 +2467,15 @@ let _ =
       end;
       output_char outchan '\n'
     done;
+    (* Handle alpha test.  *)
+    begin match alphatest_part with
+      None ->
+        print_disable_alphatest outchan
+    | Some at ->
+        print_alphatest_setup outchan at;
+	(* Alpha test requires Z-buffer testing after texturing.  *)
+	zbuf_before_texturing := false
+    end;
     Printf.fprintf outchan "GX_SetZCompLoc (%s);\n"
       (string_of_gx_bool !zbuf_before_texturing);
     close_out outchan

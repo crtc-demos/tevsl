@@ -16,8 +16,14 @@ type expr =
   | Mix of expr * expr * expr
   | Assign of dest_var * lane_select array * expr
   | Ceq of expr * expr
+  | Cne of expr * expr
   | Cgt of expr * expr
   | Clt of expr * expr
+  | Cgte of expr * expr
+  | Clte of expr * expr
+  | And of expr * expr
+  | Or of expr * expr
+  | Xor of expr * expr
   | Select of expr * lane_select array
   | Concat of expr * lane_select array
   | Ternary of expr * expr * expr
@@ -76,6 +82,7 @@ and dest_var =
   | Tevreg2
   | Itexc_dst
   | Z_dst
+  | Alpha_pass
 
 and const_setting =
     KCSEL_1
@@ -213,6 +220,10 @@ and 'av_tev tev =
 exception Parsing_stage of Lexing.position * Lexing.position
 
 exception Bad_dest_var
+
+type stage_type =
+    Regular_stage of int * expr list
+  | Alpha_test_stage of expr
 
 let destvar_of_var = function
     Tev -> Tevprev

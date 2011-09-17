@@ -71,6 +71,8 @@ rule token = parse
 		    { INDSCALE (int_of_string n) }
   | "stage"	    { STAGE }
   | "itexcoord"     { ITEXCOORD }
+  | "finally"	    { FINALLY }
+  | "alpha_pass"    { ALPHA_PASS }
   | "$" (cvar as cvar)
 		    { CVAR cvar }
   | "z"		    { Z }
@@ -86,6 +88,9 @@ rule token = parse
   | "<="	    { LTE }
   | "=="	    { EQ }
   | "!="	    { NE }
+  | "&&"	    { AND }
+  | "||"	    { OR }
+  | "^"		    { XOR }
   | "("		    { LPAREN }
   | ")"		    { RPAREN }
   | "["		    { LSQUARE }

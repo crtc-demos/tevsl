@@ -3,5 +3,4 @@ stage 0:
 
 # ??? What should the syntax for this look like? Probably not like this.
 finally:
-  if (tev.a > 30 && tev.a < 70)
-    discard;
+  alpha_pass = (tev.a > $low) ^ (tev.a < $high);
