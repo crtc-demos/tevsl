@@ -265,9 +265,10 @@ different colour channels/texture maps in colour and alpha expressions).
     like GLSL "uniform"s. These are unsigned 8-bit values only, and can be set
     with GX_SetTevKColor.
 
-You can write each of these using ".rgb" (for the colour part of the TEV)
-selectors, or using all-same selectors, ".rrr", ".ggg" etc., although you can't
-use swizzles other than those.
+You can write each of these using ".rgb" (for the colour part of the TEV) or
+".a" (for the alpha part of the TEV) selectors, or using all-same selectors,
+".rrr", ".ggg" (for colour channels) or ".r", ".g" (alpha channels) etc.,
+although you can't use swizzles other than those.
 
   tev.rgb = k0.rgb;
 
@@ -281,7 +282,7 @@ For all variables, writing them without a selector infers ".rgb" for colour
 channels (in tev.rgb = ... expressions), and ".a" for alpha channels (tev.a =
 ...).
 
-Several constants are available:
+Several true scalar constants are available:
 
   * "0", "1", "0.5", "1/8", "2/8", "3/8", etc.. These may be mapped to either
     regular constants, or "konstant" constants, as appropriate. You probably
@@ -341,7 +342,9 @@ against the accumulation variable in question:
 
 This will attempt to ensure that the "tev" input will end up in the D input,
 where it will be used properly as a signed 10-bit value. Other inputs truncate
-to the lower 8-bits and interpret them as an unsigned value.
+to the lower 8-bits and interpret them as an unsigned value. Your expression
+will fail to match if you try to use too many ":s10" annotations, rather than
+silently ignoring them.
 
 Indirect texture lookups
 ------------------------
