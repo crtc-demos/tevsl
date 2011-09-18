@@ -490,6 +490,10 @@ two comparisons (as written above), whose results may be combined in several
 ways to determine the final true/false (render fragment/do not render fragment)
 result.
 
+Note that in alpha_pass expressions, the value of tev.a ranges from 0 to 255,
+rather than the normalized range 0 to 1 used in regular TEV stage expressions.
+This follows the convention used by the underlying API.
+
 You can write any of the following for the comparison operators, which follow
 their usual meaning:
 
