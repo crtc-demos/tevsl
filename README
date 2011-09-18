@@ -519,7 +519,7 @@ You may write C variables (as above, like "$foo") instead of constants in
 alpha-test expressions (see below).
 
 Using alpha test automatically configures Z-buffering to occur after texturing
-(a hardware requirement).
+(as required by the hardware).
 
 Using C variables in expressions
 --------------------------------
