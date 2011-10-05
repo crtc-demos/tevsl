@@ -1,6 +1,5 @@
 stage 0:
   tev.a = texmap0[texcoord0].a;
 
-# ??? What should the syntax for this look like? Probably not like this.
 finally:
-  alpha_pass = tev.a > 15 ^ tev.a > 30;
+  alpha_pass = tev.a < 15 || tev.a > 220;

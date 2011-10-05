@@ -9,13 +9,22 @@ consoles (it has only been tested on the GameCube so far, however). The aim is
 to simplify programming of the texture environment units of the
 Flipper/Hollywood chips, moving some way towards making their fixed-function
 fragment-processing pipelines appear more like those available on a modern
-fully-programmable GPU, without sacrificing any of their performance or
-capabilities.
+fully-programmable GPU, without incurring any performance loss.
 
 Hopefully the friendly syntax of tevsl shader descriptions will make it easier
 to fully exploit the capabilities of Flipper/Hollywood GPUs, by making it
 clearer what each processing stage is doing and by making modifications to the
 fragment-processing setup much easier to accomplish.
+
+What is the TEV unit?
+---------------------
+
+The TEV (texture environment) unit is part of the GPU on the GameCube & Wii
+which handles fragment (pixel, more or less) processing operations. Its purpose
+is to combine inputs from e.g. texture lookups and lighting calculation results
+and combine them into a final colour for writing to the embedded framebuffer
+(EFB), and henceforth to the screen or a texture. It is not a fully-programmable
+processor, but can still be used for quite sophisticated effects.
 
 How does it work?
 -----------------

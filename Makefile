@@ -6,6 +6,7 @@ OCAMLMKTOP = ocamlmktop
 MENHIR = menhir
 OCAMLDEP = ocamldep
 OCAMLDSORT = ocamldsort
+VERSION = 0.01
 
 COBJ = 
 
@@ -17,6 +18,16 @@ OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 TARGET = tevsl
 
 all:	$(TARGET)
+
+.PHONY:	release
+release:
+	rm -rf tevsl-$(VERSION)
+	mkdir tevsl-$(VERSION)
+	mkdir tevsl-$(VERSION)/tests
+	cp -r $(OCAMLSRC) parser.mly lexer.mll README Makefile \
+	      tevsl-$(VERSION)
+	cp -r tests/*.tev tevsl-$(VERSION)/tests
+	tar fcjv ../tevsl-$(VERSION).tar.bz tevsl-$(VERSION)
 
 clean:
 	rm -f *.cmo *.cmi $(TARGET) parser.ml lexer.ml
