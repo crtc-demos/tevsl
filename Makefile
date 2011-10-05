@@ -27,7 +27,7 @@ release:
 	cp -r $(OCAMLSRC) parser.mly lexer.mll README Makefile \
 	      tevsl-$(VERSION)
 	cp -r tests/*.tev tevsl-$(VERSION)/tests
-	tar fcjv ../tevsl-$(VERSION).tar.bz tevsl-$(VERSION)
+	tar fcjv ../tevsl-$(VERSION).tar.bz2 tevsl-$(VERSION)
 
 clean:
 	rm -f *.cmo *.cmi $(TARGET) parser.ml lexer.ml
