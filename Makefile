@@ -1,5 +1,9 @@
 
+ifdef WINDOWS
+OCAMLC = i686-w64-mingw32-ocamlopt
+else
 OCAMLC = ocamlc -g
+endif
 OCAMLLEX = ocamllex
 OCAMLYACC = ocamlyacc -v
 OCAMLMKTOP = ocamlmktop

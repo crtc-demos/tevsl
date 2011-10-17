@@ -21,9 +21,9 @@ What is the TEV unit?
 
 The TEV (texture environment) unit is part of the GPU on the GameCube & Wii
 which handles fragment (pixel, more or less) processing operations. Its purpose
-is to combine inputs from e.g. texture lookups and lighting calculation results
-and combine them into a final colour for writing to the embedded framebuffer
-(EFB), and henceforth to the screen or a texture. It is not a fully-programmable
+is to take inputs from e.g. texture lookups and lighting calculation results and
+combine them into a final colour for writing to the embedded framebuffer (EFB),
+and henceforth to the screen or a texture. It is not a fully-programmable
 processor, but can still be used for quite sophisticated effects.
 
 How does it work?
