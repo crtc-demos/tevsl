@@ -586,6 +586,7 @@ the need to call any of them explicitly:
   * GX_SetZTexture
   * GX_SetAlphaCompare
   * GX_SetZCompLoc
+  * GX_SetIndTexCoordScale (soon!)
 
 You can also specify much of the functionality provided by the GX_SetTevInd*
 helper functions (GX_SetTevIndBumpST, etc.) using tevsl expressions, hopefully

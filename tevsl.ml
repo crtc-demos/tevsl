@@ -356,7 +356,7 @@ type indirect_info = {
   ind_tex_alpha_select : texcoord option;
   
   (* Other settings.  *)
-  ind_tex_coordscale : (int * int) option;
+  ind_tex_coordscale : (int32 * int32) option;
 }
 
 exception Unrecognized_indirect_texcoord_part of string * expr
@@ -379,9 +379,20 @@ let match_bias = function
   | Vec3 (a, b, c) -> [| plain_float a; plain_float b; plain_float c |]
   | x -> raise (Unrecognized_indirect_texcoord_part ("bias", x))
 
+let match_tc_maybe_div = function
+    Texcoord tc -> tc, None
+  | Divide (Texcoord tc, Int st) -> tc, Some (st, st)
+  | Divide (Texcoord tc, Vec2 (Int s, Int t)) -> tc, Some (s, t)
+  | Mult (Texcoord tc, Float 0.5) -> tc, Some (2l, 2l)
+  | x -> raise (Unrecognized_indirect_texcoord_part ("indirect texcoord", x))
+
 let match_tm_maybe_bias = function
-    Texmap (tm, Texcoord tc) -> tm, tc, [| 0.0; 0.0; 0.0 |]
-  | Plus (Texmap (tm, Texcoord tc), bias) -> tm, tc, match_bias bias
+    Texmap (tm, tc_div_or_not) ->
+      let tc, div = match_tc_maybe_div tc_div_or_not in
+      tm, tc, div, [| 0.0; 0.0; 0.0 |]
+  | Plus (Texmap (tm, tc_div_or_not), bias) ->
+      let tc, div = match_tc_maybe_div tc_div_or_not in
+      tm, tc, div, match_bias bias
   | x -> raise (Unrecognized_indirect_texcoord_part ("texmap", x))
 
 let matrix_of_dynmtx = function
@@ -410,7 +421,7 @@ let rec rewrite_indirect_texcoord = function
 	  Mult (Matmul (Indmtx im, tm_bias_or_not),
 		Indscale is)) ->
       let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not
-      and texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      and texmap, itexcoord, cs, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
         {
 	  ind_texmap = texmap;
@@ -424,7 +435,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
-	  ind_tex_coordscale = None
+	  ind_tex_coordscale = cs
         } in
       texcoord, ind_info
   | Plus ((Texcoord _ | Modulus _ as tc_modulus_or_not),
@@ -432,7 +443,7 @@ let rec rewrite_indirect_texcoord = function
 		Indscale is)) ->
       let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not in
       let mixed_texcoord = mix_texcoord texcoord from_coord
-      and texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      and texmap, itexcoord, cs, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
         {
 	  ind_texmap = texmap;
@@ -446,11 +457,11 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
-	  ind_tex_coordscale = None
+	  ind_tex_coordscale = cs
         } in
       mixed_texcoord, ind_info
   | Mult (Matmul (Indmtx im, tm_bias_or_not), Indscale is) ->
-      let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      let texmap, itexcoord, cs, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
         {
 	  ind_texmap = texmap;
@@ -465,7 +476,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
-	  ind_tex_coordscale = None
+	  ind_tex_coordscale = cs
         } in
       (* We need a texcoord which is unused, since collisions mean that
          texcoords get scaled incorrectly.  We don't know which texcoord we can
@@ -473,7 +484,7 @@ let rec rewrite_indirect_texcoord = function
       -1, ind_info
   | Mult (Matmul (D_indmtx (st, Texcoord from_coord), tm_bias_or_not),
 	  Indscale is) ->
-      let texmap, itexcoord, bias = match_tm_maybe_bias tm_bias_or_not in
+      let texmap, itexcoord, cs, bias = match_tm_maybe_bias tm_bias_or_not in
       let ind_info =
         {
 	  ind_texmap = texmap;
@@ -488,7 +499,7 @@ let rec rewrite_indirect_texcoord = function
 	  ind_tex_addprev = false;
 	  ind_tex_unmodified_lod = false;
 	  ind_tex_alpha_select = None;
-	  ind_tex_coordscale = None
+	  ind_tex_coordscale = cs
         } in
       from_coord, ind_info
   | Plus (x, Itexcoord) | Plus (Itexcoord, x) ->
@@ -869,7 +880,8 @@ let rec rewrite_tev_vars expr ~alpha =
 	| 2 -> Var_ref C2
 	| _ -> failwith "Unexpected colour register"
 	end
-    | Select (Var_ref (CR n), ([| A |] | [| A; A; A; _ |])) when not alpha ->
+    | Select (Var_ref (CR n), ([| A |] | [| A; A; A |] | [| A; A; A; _ |]))
+      when not alpha ->
         begin match n with
 	  0 -> Var_ref A0
 	| 1 -> Var_ref A1
@@ -1587,13 +1599,21 @@ let max_colour_and_texcoord_channels stage_arr =
         None -> ()
       | Some cp ->
           bump_colchans cp.colchan;
-	  bump_texchans cp.texmap_texc
+	  bump_texchans cp.texmap_texc;
+	  begin match cp.indirect with
+	    None -> ()
+	  | Some ii -> bump_texchans (Some (ii.ind_texmap, ii.ind_texcoord))
+	  end
       end;
       begin match stage.alpha_part with
         None -> ()
       | Some ap ->
           bump_colchans ap.colchan;
-	  bump_texchans ap.texmap_texc
+	  bump_texchans ap.texmap_texc;
+	  begin match ap.indirect with
+	    None -> ()
+	  | Some ii -> bump_texchans (Some (ii.ind_texmap, ii.ind_texcoord))
+	  end
       end;
       begin match stage.ind_texc_part with
         None -> ()
@@ -1750,14 +1770,15 @@ let extract_texmap_from_stage stage =
     | None -> None in
   merge_if_same tm_from_col tm_from_alpha "Mismatched texmaps"
 
-(* Get indirect texmap/texcoord from colour, alpha or "indirect texcoord" stage
-   parts.  *)
+(* Get indirect texmap/texcoord and texcoord scale from colour, alpha or
+   "indirect texcoord" stage parts.  *)
 
 let get_tm_and_tc_from_indirect_info ind_info =
   if ind_info.ind_texmap == -1 || ind_info.ind_texcoord == -1 then
     None
   else
-    Some (ind_info.ind_texmap, ind_info.ind_texcoord)
+    Some (ind_info.ind_texmap, ind_info.ind_texcoord,
+	  ind_info.ind_tex_coordscale)
 
 let put_tm_and_tc ind_info tm tc =
   if ind_info.ind_texmap == -1 || ind_info.ind_texcoord == -1 then begin
@@ -1851,7 +1872,7 @@ let fill_missing_indirect_lookups stage_arr =
   for i = 0 to Array.length stage_arr - 1 do
     begin
       try
-	let tm, tc = extract_indirect_tex_info_from_stage stage_arr.(i) in
+	let tm, tc, _ = extract_indirect_tex_info_from_stage stage_arr.(i) in
 	last_ind_tex_info := Some (tm, tc)
       with Not_found ->
         begin match !last_ind_tex_info with
@@ -1970,6 +1991,103 @@ let lookup_indirect ind_lut_arr ind_part =
   match !found with
     None -> failwith "Can't find indirect lookup"
   | Some f -> f
+
+(* Find an element of ARR for which FN elem returns true, then return the
+   element.  *)
+
+let array_find fn arr =
+  let rec iter i =
+    if i >= (Array.length arr) - 1 then
+      raise Not_found
+    else if fn arr.(i) then
+      arr.(i)
+    else
+      iter (succ i) in
+  iter 0
+
+(* Return first index of element of array ARR for which FN elem is true.  *)
+
+let array_index fn arr =
+  let rec iter i =
+    if i >= (Array.length arr) - 1 then
+      raise Not_found
+    else if fn arr.(i) then
+      i
+    else
+      iter (succ i) in
+  iter 0
+
+exception Scaled_texcoord_without_direct_usage of int32 * int32
+
+(* Look for texcoords which are used in both direct and indirect parts. If a
+   given texcoord is used as-is in direct and indirect expressions, we should
+   explicitly set the scaling to one.  Otherwise, use ind_tex_coordscale from
+   the indirect part, making sure the scale is used consistently.  *)
+
+let gather_indirect_coordscales stage_arr ind_luts =
+  let coordscales = Array.create 4 None in
+  let had_direct = Array.create 4 false in
+  for i = 0 to Array.length stage_arr - 1 do
+    try
+      let tm, tc, cs = extract_indirect_tex_info_from_stage stage_arr.(i) in
+      let idx = array_index
+		  (fun (tm', tc') -> tm == tm' && tc == tc') ind_luts in
+      coordscales.(idx) <- merge_if_same_opt cs coordscales.(idx) "coord scale"
+    with Not_found -> ()
+  done;
+  let check_direct_texcoord = function
+    Some (_, tc) ->
+      begin try
+        let idx = array_index (fun (_, tc') -> tc == tc') ind_luts in
+	match coordscales.(idx) with
+	  None ->
+	    (* We found a direct texcoord which is also used as an indirect
+	       texcoord, but has not had a scale associated with it yet. Force
+	       a scale of 1.  *)
+	    if !debug then begin
+	      Printf.fprintf stderr "Texcoord %d used in direct lookup and also in indirect stage %d: using scale of 1\n" tc idx
+	    end;
+	    coordscales.(idx) <- Some (1l, 1l);
+	    had_direct.(idx) <- true
+	| Some (s_scale, t_scale) ->
+	    if !debug then begin
+	      Printf.fprintf stderr "Using scale factor 1/(%ld,%ld) for indirect texcoord %d in lookup %d\n" s_scale t_scale tc idx
+	    end;
+	    had_direct.(idx) <- true
+      with Not_found ->
+        if !debug then begin
+	  Printf.fprintf stderr "Direct texcoord %d is not used in indirect lookups\n" tc
+	end;
+      end
+  | None -> () in
+  for i = 0 to Array.length stage_arr - 1 do
+    begin match stage_arr.(i).colour_part with
+      Some cpart -> check_direct_texcoord cpart.texmap_texc
+    | None -> ()
+    end;
+    begin match stage_arr.(i).alpha_part with
+      Some apart -> check_direct_texcoord apart.texmap_texc
+    | None -> ()
+    end;
+    begin match stage_arr.(i).ind_direct_tex_part with
+      Some idpart ->
+        begin match idpart.ind_dir_texmap with
+	  Some tm -> check_direct_texcoord (Some (tm, idpart.ind_dir_texcoord))
+	| None -> ()
+	end
+    | None -> ()
+    end
+  done;
+  Array.iteri
+    (fun idx had_direct ->
+      if not had_direct then
+        match coordscales.(idx) with
+	  None 
+	| Some (1l, 1l) -> ()
+	| Some (ss, ts) ->
+	    raise (Scaled_texcoord_without_direct_usage (ss, ts)))
+    had_direct;
+  coordscales
 
 let string_of_stagenum n =
   "GX_TEVSTAGE" ^ (string_of_int n)
@@ -2278,6 +2396,29 @@ let print_indirect_lookups oc lut_arr =
       i tc tm
   done
 
+exception Bad_coordinate_scale of int32
+
+let string_of_coordscale = function
+    1l -> "GX_ITS_1"
+  | 2l -> "GX_ITS_2"
+  | 4l -> "GX_ITS_4"
+  | 8l -> "GX_ITS_8"
+  | 16l -> "GX_ITS_16"
+  | 32l -> "GX_ITS_32"
+  | 64l -> "GX_ITS_64"
+  | 128l -> "GX_ITS_128"
+  | 256l -> "GX_ITS_256"
+  | x -> raise (Bad_coordinate_scale x)
+
+let print_indirect_coordscales oc coordscale_arr =
+  for i = 0 to Array.length coordscale_arr - 1 do
+    match coordscale_arr.(i) with
+      None -> ()
+    | Some (ss, ts) ->
+        Printf.fprintf oc "GX_SetIndTexCoordScale (GX_INDTEXSTAGE%d, %s, %s);\n"
+	  i (string_of_coordscale ss) (string_of_coordscale ts)
+  done
+
 let print_indirect_setup oc stagenum ind_lookups ind_part =
   match ind_part with
     None -> Printf.fprintf oc "GX_SetTevDirect (%s);\n"
@@ -2412,9 +2553,13 @@ let _ =
     fill_missing_texcoords stage_arr num_texchans;
     fill_missing_indirect_lookups stage_arr;
     let indirect_lookups = gather_indirect_lookups stage_arr in
+    let indirect_coordscales = gather_indirect_coordscales stage_arr
+				 indirect_lookups in
     print_swap_tables outchan swap_tables;
     output_char outchan '\n';
     print_indirect_lookups outchan indirect_lookups;
+    output_char outchan '\n';
+    print_indirect_coordscales outchan indirect_coordscales;
     output_char outchan '\n';
     let zbuf_before_texturing = ref true in
     for i = 0 to num_stages - 1 do
