@@ -1997,7 +1997,7 @@ let lookup_indirect ind_lut_arr ind_part =
 
 let array_find fn arr =
   let rec iter i =
-    if i >= (Array.length arr) - 1 then
+    if i >= Array.length arr then
       raise Not_found
     else if fn arr.(i) then
       arr.(i)
@@ -2009,7 +2009,7 @@ let array_find fn arr =
 
 let array_index fn arr =
   let rec iter i =
-    if i >= (Array.length arr) - 1 then
+    if i >= Array.length arr then
       raise Not_found
     else if fn arr.(i) then
       i
