@@ -458,6 +458,46 @@ Recognition of indirect texture expressions is a little more strict than regular
 TEV expressions, in terms of the order in which you must write terms, etc.. This
 is probably a bug, and may be fixed in due course.
 
+Texture coordinate scaling
+--------------------------
+
+A feature not mentioned in the previous section (currently slightly
+experimental) is support for sharing texture coordinates between direct and
+indirect stages. Normally texture coordinates are automatically scaled to the
+size of the texture map which is the subject of the lookup in question: this is
+true of both direct lookups and indirect lookups.
+
+Sometimes it's useful to use the same texture coordinate for both an indirect
+lookup AND a direct lookup: the hardware provides limited support for this, both
+in cases where the indirect and direct texture maps are the same size, and when
+the indirect texture map is a power-of-two factor smaller than the direct
+texture map. You may also use separate scales for the width and height of the
+indirect texture.
+
+To use this feature in its simplest form, just write the same texcoord for direct and indirect parts:
+
+stage 0:
+  tev.rgb = texmap0[texcoord0];
+
+stage 1:
+  cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0] * indscale0];
+
+To use the scaling feature, write the indirect part like so:
+
+stage 1:
+  cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0 / 2] * indscale0];
+
+or, for separate width/height scales, e.g:
+
+stage 1:
+  texmap1[indmtx0 ** texmap2[texcoord0 / vec2(4, 8)] * indscale0];
+
+You may use any power-of-two scale between 1 and 256.
+
+Note that you cannot share texture *maps* between direct and indirect stages.
+Any given map must be used exclusively for direct or exclusively for indirect
+lookups.
+
 Z textures
 ----------
 
@@ -586,7 +626,7 @@ the need to call any of them explicitly:
   * GX_SetZTexture
   * GX_SetAlphaCompare
   * GX_SetZCompLoc
-  * GX_SetIndTexCoordScale (soon!)
+  * GX_SetIndTexCoordScale
 
 You can also specify much of the functionality provided by the GX_SetTevInd*
 helper functions (GX_SetTevIndBumpST, etc.) using tevsl expressions, hopefully
