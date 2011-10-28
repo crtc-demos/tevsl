@@ -483,6 +483,11 @@ stage 0:
 stage 1:
   cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0] * indscale0];
 
+In this case, the scaling factor for the indirect lookup will be set to 1, so
+typically texmap0 and texmap2 will need to have the same size (the size of
+texmap1 is irrelevent to the discussion here, always being "manually" controlled
+by the indirect matrix).
+
 To use the scaling feature, write the indirect part like so:
 
 stage 1:
