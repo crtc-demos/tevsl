@@ -474,7 +474,8 @@ the indirect texture map is a power-of-two factor smaller than the direct
 texture map. You may also use separate scales for the width and height of the
 indirect texture.
 
-To use this feature in its simplest form, just write the same texcoord for direct and indirect parts:
+To use this feature in its simplest form with tevsl, just write the same
+texcoord for direct and indirect parts:
 
 stage 0:
   tev.rgb = texmap0[texcoord0];
