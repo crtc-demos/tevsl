@@ -61,6 +61,7 @@ rule token = parse
       }
   | "texmap" (intnum as n)
 		    { TEXMAP (int_of_string n) }
+  | "texmap"	    { TEXMAP_VAR }
   | "texcoord" (intnum as n)
 		    { TEXCOORD (int_of_string n) }
   | "indmtx" (intnum as n)

@@ -5,7 +5,7 @@
 %token EOL ASSIGN RPAREN LPAREN NE EQ LT GT LTE GTE DIVIDE MULT PLUS MINUS
 %token STAGE COLON SEMICOLON QUESTIONMARK CLAMP MIX COMMA LSQUARE RSQUARE EOF
 %token LBRACE RBRACE DOT S10 MATMUL MODULUS VEC2 VEC3 ITEXCOORD Z FINALLY
-%token ALPHA_PASS AND OR XOR
+%token ALPHA_PASS AND OR XOR TEXMAP_VAR
 %token <int32> INT
 %token <float> FLOAT
 %token <int> TEXMAP TEXCOORD INDSCALE ZBITS
@@ -90,9 +90,15 @@ rhs_expr: n = INT			{ Expr.Int n }
 	| v = VAR 			{ Expr.Var_ref v }
 	| v = CVAR			{ Expr.CVar v }
 	| m = TEXMAP LSQUARE e = rhs_expr RSQUARE
-					{ Expr.Texmap (m, e) }
+					{ Expr.Texmap (Expr.Int_cst m, e) }
+        | TEXMAP_VAR v = CVAR LSQUARE e = rhs_expr RSQUARE
+					{ Expr.Texmap (Expr.Int_cvar v, e) }
 	| m = TEXMAP COLON b = ZBITS LSQUARE e = rhs_expr RSQUARE
-					{ Expr.Zbits (b, Expr.Texmap (m, e)) }
+					{ Expr.Zbits (b,
+					    Expr.Texmap (Expr.Int_cst m, e)) }
+	| TEXMAP_VAR v = CVAR COLON b = ZBITS LSQUARE e = rhs_expr RSQUARE
+					{ Expr.Zbits (b,
+					    Expr.Texmap (Expr.Int_cvar v, e)) }
         | t = TEXCOORD			{ Expr.Texcoord t }
 	| s = INDSCALE			{ Expr.Indscale s }
 	| m = INDMTX			{ Expr.Indmtx m }

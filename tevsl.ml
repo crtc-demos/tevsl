@@ -342,7 +342,7 @@ type ind_matrix_type =
 
 type indirect_info = {
   (* Settings in GX_SetIndTexOrder.  *)
-  mutable ind_texmap : int;
+  mutable ind_texmap : int_cst_or_cvar;
   mutable ind_texcoord : int;
   (* Settings in GX_SetTevIndirect.  *)
   ind_tex_format : int;
@@ -509,7 +509,7 @@ let rec rewrite_indirect_texcoord = function
       let texcoord, modu = match_tc_maybe_modulus tc_modulus_or_not in
       let ind_info =
         {
-	  ind_texmap = -1;
+	  ind_texmap = Int_cst (-1);
 	  ind_texcoord = -1;
 	  ind_tex_format = 8;
 	  ind_tex_bias = [| 0.0; 0.0; 0.0 |];
@@ -1065,6 +1065,10 @@ let string_of_indmtx = function
     Ind_matrix i -> "indmtx" ^ string_of_int i
   | No_matrix -> "no_matrix"
 
+let string_of_int_cst_or_cvar = function
+    Int_cst x -> string_of_int x
+  | Int_cvar x -> "$" ^ x
+
 let string_of_expression expr =
   let b = Buffer.create 20 in
   let rec add_binop x op y =
@@ -1130,7 +1134,8 @@ let string_of_expression expr =
       Buffer.add_string b " : ";
       scan z
   | Texmap (x, y) ->
-      Buffer.add_string b (Printf.sprintf "texmap%d[" x);
+      Buffer.add_string b (Printf.sprintf "texmap%s["
+        		    (string_of_int_cst_or_cvar x));
       scan y;
       Buffer.add_char b ']'
   | Texcoord t -> Buffer.add_string b ("texcoord" ^ string_of_int t)
@@ -1161,15 +1166,11 @@ type ztex_fmt = Z8 | Z16 | Z24x8
 
 type ztex_operation = Ztex_add | Ztex_replace
 
-type int_cst_or_cvar =
-    Int_cst of int
-  | Int_cvar of string
-
 type ztex_info = {
   ztex_fmt : ztex_fmt;
   ztex_offset : int_cst_or_cvar;
   ztex_operation : ztex_operation;
-  ztex_texmap_texc : int * int
+  ztex_texmap_texc : int_cst_or_cvar * int
 }
 
 type alphatest_combine = Acomb_or | Acomb_and | Acomb_xor | Acomb_xnor
@@ -1191,7 +1192,7 @@ type alphatest_info = {
 type 'ac stage_info = {
   stage_operation : 'ac tev;
   const_usage : const_setting option;
-  mutable texmap_texc : (int * int) option;
+  mutable texmap_texc : (int_cst_or_cvar * int) option;
   indirect : indirect_info option;
   colchan: var_param option
 }
@@ -1202,7 +1203,7 @@ type 'ac stage_info = {
 
 type tex_info = {
   mutable ind_dir_texcoord : int;
-  mutable ind_dir_texmap : int option;
+  mutable ind_dir_texmap : int_cst_or_cvar option;
   mutable ind_dir_nullified : bool
 }
 
@@ -1770,21 +1771,28 @@ let extract_texmap_from_stage stage =
     | None -> None in
   merge_if_same tm_from_col tm_from_alpha "Mismatched texmaps"
 
+exception Ind_cvar_unsupported
+
 (* Get indirect texmap/texcoord and texcoord scale from colour, alpha or
    "indirect texcoord" stage parts.  *)
 
 let get_tm_and_tc_from_indirect_info ind_info =
-  if ind_info.ind_texmap == -1 || ind_info.ind_texcoord == -1 then
-    None
-  else
-    Some (ind_info.ind_texmap, ind_info.ind_texcoord,
-	  ind_info.ind_tex_coordscale)
+  match ind_info.ind_texmap, ind_info.ind_texcoord with
+    Int_cst (-1), -1 -> None
+  | Int_cst (-1), _ -> None
+  | Int_cst _, -1 -> None
+  | Int_cst tm, tc -> Some (tm, tc, ind_info.ind_tex_coordscale)
+  | Int_cvar _, _ -> raise Ind_cvar_unsupported
 
 let put_tm_and_tc ind_info tm tc =
-  if ind_info.ind_texmap == -1 || ind_info.ind_texcoord == -1 then begin
-    ind_info.ind_texmap <- tm;
-    ind_info.ind_texcoord <- tc
-  end
+  match ind_info.ind_texmap, ind_info.ind_texcoord with
+    Int_cst (-1), -1
+  | Int_cst (-1), _
+  | Int_cst _, -1 ->
+      ind_info.ind_texmap <- Int_cst tm;
+      ind_info.ind_texcoord <- tc
+  | Int_cst _, _ -> ()
+  | Int_cvar _, _ -> raise Ind_cvar_unsupported
 
 let extract_indirect_tex_info_from_stage stage =
   let ipart = match stage.ind_texc_part with
@@ -1853,9 +1861,11 @@ let fill_missing_indirect_lookups stage_arr =
 	| None ->
 	    if !debug then begin
 	      match !direct_ind_tex with
-	        Some tm ->
+	        Some (Int_cst tm) ->
 		  Printf.fprintf stderr "Filling direct texmap %d at stage %d\n"
 		    tm i
+	      | Some (Int_cvar _) ->
+	          raise Ind_cvar_unsupported
 	      | None ->
 	          Printf.fprintf stderr
 		    "Not filling direct texmap at stage %d\n" i
@@ -2031,7 +2041,10 @@ let gather_indirect_coordscales stage_arr ind_luts =
     try
       let tm, tc, cs = extract_indirect_tex_info_from_stage stage_arr.(i) in
       let idx = array_index
-		  (fun (tm', tc') -> tm == tm' && tc == tc') ind_luts in
+	(fun (tm', tc') ->
+	  match tm' with
+	    Int_cst tm' -> tm == tm' && tc == tc'
+	  | _ -> false) ind_luts in
       coordscales.(idx) <- merge_if_same_opt cs coordscales.(idx) "coord scale"
     with Not_found -> ()
   done;
@@ -2286,13 +2299,16 @@ let print_const_setup oc stage cst ~alpha =
     Printf.fprintf oc "GX_SetTevKColorSel (%s, %s);\n"
       (string_of_stagenum stage) (string_of_const cst false)
 
+let string_of_texmap = function
+    Int_cst n -> "GX_TEXMAP" ^ string_of_int n
+  | Int_cvar v -> v
+
 (* Print a normal (direct) texture lookup order.  *)
 
 let print_tev_order oc stage_num texmap ~nullified colchan =
   let tm, tc = match texmap with
     None -> "GX_TEXMAP_NULL", "GX_TEXCOORDNULL"
-  | Some (tm, tc) ->
-      "GX_TEXMAP" ^ string_of_int tm, "GX_TEXCOORD" ^ string_of_int tc
+  | Some (tm, tc) -> (string_of_texmap tm), "GX_TEXCOORD" ^ string_of_int tc
   and cc = match colchan with
     None -> "GX_COLORNULL"
   | Some c -> string_of_colour_chan c
@@ -2392,8 +2408,8 @@ let print_indirect_lookups oc lut_arr =
   for i = 0 to Array.length lut_arr - 1 do
     let tm, tc = lut_arr.(i) in
     Printf.fprintf oc
-      "GX_SetIndTexOrder (GX_INDTEXSTAGE%d, GX_TEXCOORD%d, GX_TEXMAP%d);\n"
-      i tc tm
+      "GX_SetIndTexOrder (GX_INDTEXSTAGE%d, GX_TEXCOORD%d, %s);\n"
+      i tc (string_of_texmap tm)
   done
 
 exception Bad_coordinate_scale of int32

@@ -27,7 +27,7 @@ type expr =
   | Select of expr * lane_select array
   | Concat of expr * lane_select array
   | Ternary of expr * expr * expr
-  | Texmap of int * expr
+  | Texmap of int_cst_or_cvar * expr
   | Texcoord of int
   | Indscale of int
   | Indmtx of ind_matrix
@@ -37,6 +37,10 @@ type expr =
   | Zbits of int * expr
   | CVar of string
   | Protect of expr  (* Don't map child expr in map_expr.  *)
+
+and int_cst_or_cvar =
+    Int_cst of int
+  | Int_cvar of string
 
 (* X for "don't care".  *)
 and lane_select = R | G | B | A | LS_S | LS_T | X
