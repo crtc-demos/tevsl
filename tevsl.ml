@@ -634,34 +634,46 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 	      scale = scale_of_expr tevscale;
 	      clamp = false;
 	      result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select (Var_ref a, [| R |])
-					   | Concat (Var_ref a, [| R |])
-					   | Var_ref (Extracted_const as a)),
-					  (Select (Var_ref b, [| R |])
-					   | Concat (Var_ref b, [| R |])
-					   | Var_ref (Extracted_const as b))),
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Select ((Var_ref _) as a, [| R |])
+					   | Concat ((Var_ref _) as a, [| R |])
+					   | (Var_ref _ as a)
+					   | (Int _ as a)
+					   | (Float _ as a)),
+					  (Select ((Var_ref _ as b), [| R |])
+					   | Concat ((Var_ref _ as b), [| R |])
+					   | (Var_ref _ as b)
+					   | (Int _ as b)
+					   | (Float _ as b))),
 				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr (Var_ref a);
-	     cmp_b = ac_var_of_expr (Var_ref b);
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select (Var_ref a, [| R |])
-					   | Concat (Var_ref a, [| R |])
-					   | Var_ref (Extracted_const as a)),
-					  (Select (Var_ref b, [| R |])
-					   | Concat (Var_ref b, [| R |])
-					   | Var_ref (Extracted_const as b))),
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Select ((Var_ref _) as a, [| R |])
+					   | Concat ((Var_ref _) as a, [| R |])
+					   | (Var_ref _ as a)
+					   | (Int _ as a)
+					   | (Float _ as a)),
+					  (Select ((Var_ref _) as b, [| R |])
+					   | Concat ((Var_ref _) as b, [| R |])
+					   | (Var_ref _ as b)
+					   | (Int _ as b)
+					   | (Float _ as b))),
 				     c, Int 0l))) ->
-      Comp { cmp_a = ac_var_of_expr (Var_ref a);
-	     cmp_b = ac_var_of_expr (Var_ref b);
+      Comp { cmp_a = ac_var_of_expr a;
+	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_r8_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| R; G |]),
-					  Concat (b, [| R; G |])),
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Concat (a, [| R; G |])
+					   | (Int _ as a)
+					   | (Float _ as a)),
+					  (Concat (b, [| R; G |])
+					   | (Int _ as b)
+					   | (Float _ as b))),
 				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -669,8 +681,12 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| R; G |]),
-					  Concat (b, [| R; G |])),
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Concat (a, [| R; G |])
+					   | (Int _ as a)
+					   | (Float _ as a)),
+					  (Concat (b, [| R; G |])
+					   | (Int _ as b)
+					   | (Float _ as b))),
 				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -678,8 +694,12 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_gr16_eq;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Cgt (Concat (a, [| R; G; B |]),
-					  Concat (b, [| R; G; B |])),
+  | Assign (dv, _, Plus (d, Ternary (Cgt ((Concat (a, [| R; G; B |])
+					   | (Int _ as a)
+					   | (Float _ as a)),
+					  (Concat (b, [| R; G; B |])
+					   | (Int _ as b)
+					   | (Float _ as b))),
 				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
@@ -687,8 +707,12 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 	     cmp_d = ac_var_of_expr d;
 	     cmp_op = CMP_bgr24_gt;
 	     cmp_result = dv }
-  | Assign (dv, _, Plus (d, Ternary (Ceq (Concat (a, [| R; G; B |]),
-					  Concat (b, [| R; G; B |])),
+  | Assign (dv, _, Plus (d, Ternary (Ceq ((Concat (a, [| R; G; B |])
+					   | (Int _ as a)
+					   | (Float _ as a)),
+					  (Concat (b, [| R; G; B |])
+					   | (Int _ as b)
+					   | (Float _ as b))),
 				     c, Int 0l))) ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;

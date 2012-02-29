@@ -4,12 +4,12 @@ TEVSL
 What is it?
 -----------
 
-Tevsl is a kind-of fragment-shading language for the Nintendo GameCube & Wii
-consoles (it has only been tested on the GameCube so far, however). The aim is
-to simplify programming of the texture environment units of the
-Flipper/Hollywood chips, moving some way towards making their fixed-function
-fragment-processing pipelines appear more like those available on a modern
-fully-programmable GPU, without incurring any performance loss.
+Tevsl is a kind-of fragment-shading language for the Nintendo
+GameCube & Wii consoles. The aim is to simplify programming of the
+texture environment units of the Flipper/Hollywood chips, moving some
+way towards making their fixed-function fragment-processing pipelines
+appear more like those available on a modern fully-programmable GPU,
+without incurring any performance loss.
 
 Hopefully the friendly syntax of tevsl shader descriptions will make it easier
 to fully exploit the capabilities of Flipper/Hollywood GPUs, by making it
@@ -19,12 +19,13 @@ fragment-processing setup much easier to accomplish.
 What is the TEV unit?
 ---------------------
 
-The TEV (texture environment) unit is part of the GPU on the GameCube & Wii
-which handles fragment (pixel, more or less) processing operations. Its purpose
-is to take inputs from e.g. texture lookups and lighting calculation results and
-combine them into a final colour for writing to the embedded framebuffer (EFB),
-and henceforth to the screen or a texture. It is not a fully-programmable
-processor, but can still be used for quite sophisticated effects.
+The TEV (texture environment) unit is part of the GPU on the
+GameCube & Wii which handles fragment (pixel, more or less) processing
+operations. Its purpose is to take inputs from e.g. texture lookups and
+lighting calculation results and combine them into a final colour for
+writing to the embedded framebuffer (EFB), and henceforth to the screen
+or a texture. It is not a fully-programmable processor, but can still
+be used for quite sophisticated effects.
 
 How does it work?
 -----------------
@@ -79,7 +80,7 @@ simultaneously, though you can also split the colour/alpha parts and perform
 different operations for each (see below).
 
 Though several kinds of expression are supported, note that tevsl can't
-magically add programmability to Flipper/Hollywood chip: so, you're quite
+magically add programmability to the Flipper/Hollywood chip: so, you're quite
 restricted in what you can write on the RHS of each stage description.
 
 The "canonical" form of expression which is supported is as follows:
