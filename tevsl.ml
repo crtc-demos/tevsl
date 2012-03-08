@@ -644,7 +644,7 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 					   | (Var_ref _ as b)
 					   | (Int _ as b)
 					   | (Float _ as b))),
-				     c, Int 0l))) ->
+				     c, Int 0l))) when not alpha ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
@@ -661,7 +661,7 @@ let rec arith_op_of_expr expr ~alpha ac_var_of_expr =
 					   | (Var_ref _ as b)
 					   | (Int _ as b)
 					   | (Float _ as b))),
-				     c, Int 0l))) ->
+				     c, Int 0l))) when not alpha ->
       Comp { cmp_a = ac_var_of_expr a;
 	     cmp_b = ac_var_of_expr b;
 	     cmp_c = ac_var_of_expr c;
