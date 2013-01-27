@@ -34,21 +34,21 @@ Short stage-by-stage "shader" descriptions are fed into tevsl, which processes
 them and emits a description which can be directly #included into C code. For
 example basic texture mapping can be achieved by writing the following:
 
-stage 0:
-  tev = texmap0[texcoord0];
+    stage 0:
+      tev = texmap0[texcoord0];
 
 The effect of this is to look up texture coordinates specified by texcoord0 in
 the texture map texmap0, and assign the RGBA results to "tev". This can be
 compiled as follows:
 
-$ tevsl basic-texture.tev -o basic-texture.inc
+    $ tevsl basic-texture.tev -o basic-texture.inc
 
 and then in your C program, you write something like:
 
-void setup_basic_texture_mapping (void)
-{
-#include "basic-texture.inc"
-}
+    void setup_basic_texture_mapping (void)
+    {
+    #include "basic-texture.inc"
+    }
 
 Ideally, you should set up Makefile (or whatever other build system you use)
 rules so that .inc files are automatically regenerated when you edit the
@@ -64,11 +64,11 @@ Basic syntax
 You must write consecutively-numbered definitions for each of the stages you
 want to use:
 
-stage 0:
-  tev = ...;
+    stage 0:
+      tev = ...;
 
-stage 1:
-  tev = ...;
+    stage 1:
+      tev = ...;
 
 (The need to manually number stages may disappear at some point.)
 
@@ -85,21 +85,21 @@ restricted in what you can write on the RHS of each stage description.
 
 The "canonical" form of expression which is supported is as follows:
 
-stage 0:
-  tev = (<accum> [+/-] ((1 - c) * a + c * b) + <bias>) * <scale>;
+    stage 0:
+      tev = (<accum> [+/-] ((1 - c) * a + c * b) + <bias>) * <scale>;
 
 You can write such expressions out "in full", e.g.:
 
-stage 0:
-  tev = (tev + ((1 - chan0) * texmap0[texcoord0] + chan0 * cr0) + 0) * 2;
+    stage 0:
+      tev = (tev + ((1 - chan0) * texmap0[texcoord0] + chan0 * cr0) + 0) * 2;
 
 Or, since you won't want to use all the available functionality per-stage all
 the time, you can write simplified versions of the expression and tevsl will
 rewrite the expression for you into the fixed format required by the hardware.
 So you can write, e.g.:
 
-stage 0:
-  tev = texmap0[texcoord0] + chan0;
+    stage 0:
+      tev = texmap0[texcoord0] + chan0;
 
 and you will get the expected result. Beware that this is no computer algebra
 system which can infer the correct form of expression from anything you feed it
@@ -128,7 +128,7 @@ You can clamp the result of each TEV stage (to 0...1, i.e. the maximum and
 minimum representable values for each of the R,G,B,A colour channels), by
 writing:
 
-  tev = clamp (<expr>);
+    tev = clamp (<expr>);
 
 around your expression. Channels are clamped independently, and you can clamp
 colour channels but not alpha channels, or vice versa.
@@ -138,11 +138,11 @@ Blending
 
 A simplified form of syntax is provided for writing blending equations:
 
-  tev = mix (<var1>, <var2>, <amt>);
+    tev = mix (<var1>, <var2>, <amt>);
 
 This is internally rewritten to:
 
-  tev = (1 - <amt>) * <var1> + <amt> * <var2>;
+    tev = (1 - <amt>) * <var1> + <amt> * <var2>;
 
 This is similar to the GLSL mix() function: 0 for <amt> gives the value of
 <var1>, 1 for <amt> gives the value of <var2>, and inbetween values linearly
@@ -151,25 +151,25 @@ interpolate between the two. Channels are mixed independently.
 Note that using this function means the canonical TEV expression can be written
 more concisely as:
 
-  tev = (<accum> [+/-] mix (<var1>, <var2>, <amt>) + <bias>) * <scale>;
+    tev = (<accum> [+/-] mix (<var1>, <var2>, <amt>) + <bias>) * <scale>;
 
 Simplified forms
 ----------------
 
 Quite a few simplified forms of the above expression are recognized. These are a
-few examples.
+few examples:
 
-  tev = tev + chan0;
+    tev = tev + chan0;
 
-  tev = tev * chan1;
+    tev = tev * chan1;
 
-  tev = tev * 2;
-  
-  tev = tev / 2;
-  
-  tev = clamp ((1 - tev) * 2);   (!!! this doesn't work, bug.)
-  
-  tev = clamp (chan0.aaa + chan0.rgb);
+    tev = tev * 2;
+
+    tev = tev / 2;
+
+    tev = clamp ((1 - tev) * 2);   (!!! this doesn't work, bug.)
+
+    tev = clamp (chan0.aaa + chan0.rgb);
 
 The last of these introduces a new feature, channel selection. This is described
 more fully in the following sections.
@@ -180,20 +180,20 @@ Separate colour/alpha expressions
 The colour and alpha settings for each TEV stage are independent. You can
 describe this to tevsl by writing separate equations, like so:
 
-stage 0:
-  tev.rgb = chan0.rgb;
-  tev.a = 1;
+    stage 0:
+      tev.rgb = chan0.rgb;
+      tev.a = 1;
 
 You can't split channels in different groupings from these on the LHS of these
 expressions though: we're limited to what's supported by the TEV unit (and we
 don't support merging/rearranging expressions setting different channels, even
 when it might be technically possible. E.g. this will NOT work:
 
-stage 0:
-  tev.r = chan0.r;
-  tev.g = chan0.g;
-  tev.b = chan0.b;
-  tev.a = chan0.a;
+    stage 0:
+      tev.r = chan0.r;
+      tev.g = chan0.g;
+      tev.b = chan0.b;
+      tev.a = chan0.a;
 
 it's not clear how useful such functionality would be.)
 
@@ -203,7 +203,7 @@ expressions which are valid for both the alpha and colour TEV parts.
 
 You can also write all channels explicitly if you wish:
 
-  tev.rgba = chan0.rgba;
+    tev.rgba = chan0.rgba;
 
 This has the same meaning as omitting the ".rgba" parts from both the LHS and
 RHS of the expression (if it doesn't, it's a bug!).
@@ -229,12 +229,12 @@ These variables can be used with channel selectors,
 
 For colour channels, e.g.
 
-  tev.rgb = tev.rgb;  (pass through colour unchanged)
-  tev.rgb = cr0.aaa;
+    tev.rgb = tev.rgb;  (pass through colour unchanged)
+    tev.rgb = cr0.aaa;
   
 For alpha channels, e.g.:
 
-  tev.a = cr1.a;
+    tev.a = cr1.a;
 
 There's no facility to swizzle colours with the tev/crN variables beyond the
 alpha selection already shown (.aaa). These are "signed 10 bit" quantities (at
@@ -256,17 +256,17 @@ channel combinations possible in total: tevsl will attempt to merge tables
 wherever possible, and will give an error if you attempt to use too many). So
 you can write any of:
 
-  tev.rgb = chan0.rgb;
-  
-  tev.rgb = chan0.rrr;
-  
-  tev.rgb = chan1.bgr;
-  
-  tev.a = texmap0[texcoord1].g;
-  
-  tev.rgb = chan1.aaa;
-  
-  tev.rgb = chan1.rrr + chan1.ggg;
+    tev.rgb = chan0.rgb;
+
+    tev.rgb = chan0.rrr;
+
+    tev.rgb = chan1.bgr;
+
+    tev.a = texmap0[texcoord1].g;
+
+    tev.rgb = chan1.aaa;
+
+    tev.rgb = chan1.rrr + chan1.ggg;
 
 Even corner cases such as the last are supported, since alpha and colour
 channels can be referred to independently by the colour TEV channels, and both
@@ -286,15 +286,15 @@ different colour channels/texture maps in colour and alpha expressions).
 You can write each of these using ".rgb" (for the colour part of the TEV) or
 ".a" (for the alpha part of the TEV) selectors, or using all-same selectors,
 ".rrr", ".ggg" (for colour channels) or ".r", ".g" (alpha channels) etc.,
-although you can't use swizzles other than those.
+although you can't use swizzles other than those. E.g.:
 
-  tev.rgb = k0.rgb;
+    tev.rgb = k0.rgb;
 
-  tev.a = k0.a;
+    tev.a = k0.a;
 
-  tev.rgb = k1.rrr;
+    tev.rgb = k1.rrr;
 
-  tev.a = k0.g;
+    tev.a = k0.g;
 
 For all variables, writing them without a selector infers ".rgb" for colour
 channels (in tev.rgb = ... expressions), and ".a" for alpha channels (tev.a =
@@ -316,11 +316,11 @@ Ternary (conditional) expressions
 You can write conditional expressions using C-like ternary operations. The
 general form of these look like this:
 
-  tev = <accum> [+/-] ((<var1> <cmp> <var2>) ? <true-val> : 0);
+    tev = <accum> [+/-] ((<var1> <cmp> <var2>) ? <true-val> : 0);
 
 A concrete example, an 8-bit comparison:
 
-  tev.rgb = (texmap1[texcoord1].r > tev.r) ? 1 : 0;
+    tev.rgb = (texmap1[texcoord1].r > tev.r) ? 1 : 0;
 
 The R, G, and B channels of the TEV output for this stage will each be set to 1
 (if the comparison is true), or 0 (if it is false). You can also use "==" for an
@@ -328,7 +328,7 @@ equality test.
 
 You can also do element-wise comparisons:
 
-  tev.rgb = (texmap1[texcoord1].rgb > tev.rgb) ? 1 : 0;
+    tev.rgb = (texmap1[texcoord1].rgb > tev.rgb) ? 1 : 0;
 
 then three separate 8-bit comparisons will be performed for each of the R, G and
 B channels, and the corresponding results written to the RGB channels of TEV.
@@ -336,7 +336,7 @@ B channels, and the corresponding results written to the RGB channels of TEV.
 You can also use a different syntax to "concatenate" channels, and do 16- or
 24-bit comparisons:
 
-  tev.rgb = (texmap1[texcoord1]{gr} > tev{gr}) ? 1 : 0;
+    tev.rgb = (texmap1[texcoord1]{gr} > tev{gr}) ? 1 : 0;
 
 In such expressions, the most-significant channel comes first, the
 least-significant last. The "canonical" ordering of these channels is "bgr",
@@ -356,7 +356,7 @@ there would still be ambiguous cases). If the data type is important, e.g. you
 are accumulating a value over several stages, you should write an annotation
 against the accumulation variable in question:
 
-  tev = (tev:s10) + cr1;
+    tev = (tev:s10) + cr1;
 
 This will attempt to ensure that the "tev" input will end up in the D input,
 where it will be used properly as a signed 10-bit value. Other inputs truncate
@@ -372,7 +372,7 @@ written using a couple of different syntaxes.
 
 A simple form is as follows:
 
-  tev = texmap0[indmtx0 ** texmap1[texcoord0] * indscale0];
+    tev = texmap0[indmtx0 ** texmap1[texcoord0] * indscale0];
 
 "indmtx0" and "indscale0" here refer to the indirect matrix and scale set by the
 GX_SetIndTexMatrix API. This expression will look up a texel from
@@ -382,11 +382,11 @@ you use must be equal to the matrix number (a hardware limitation).
 
 You can also use a bias expression:
 
-  tev = texmapN[<indmtx> ** (texmapO[texcoordP] + <bias>) * indscaleM];
+    tev = texmapN[<indmtx> ** (texmapO[texcoordP] + <bias>) * indscaleM];
 
 bias can be, e.g.:
 
-  vec3 (-128, -128, 0)
+    vec3 (-128, -128, 0)
 
 where the values can each be either -128 or 0 per-channel. (Other biases are
 used under certain circumstances, but those are not yet implemented.)
@@ -399,7 +399,7 @@ from 0...1 to the texture size.
 
 You can add a regular texcoord to an indirectly looked-up texcoord:
 
-  tev = texmap0[texcoord1 + indmtx0 ** texmap1[texcoord0] * indscale0];
+    tev = texmap0[texcoord1 + indmtx0 ** texmap1[texcoord0] * indscale0];
 
 The texture lookup (in texmap0 in the example) will then use the resulting
 texture coordinates from this calculation. Texcoord1 will be automatically
@@ -408,24 +408,24 @@ scaled to texmap0's size before the addition as for normal texture lookups.
 You can also use wrapping on the regular texture coordinate using a "modulus"
 (%) operator:
 
-  tev = texmap0[(texcoord1 % 32) + indmtx0 ** texmap1[texcoord0] * indscale0];
+    tev = texmap0[(texcoord1 % 32) + indmtx0 ** texmap1[texcoord0] * indscale0];
 
 The right-hand side of the modulus operator can be an integer (as written), or a
 two-element vector to use different moduli for the S and T coordinates:
 
-  tev = texmap0[(texcoord1 % vec2 (32, 16)) + indmtx0 ...];
+    tev = texmap0[(texcoord1 % vec2 (32, 16)) + indmtx0 ...];
 
 It is sometimes necessary (e.g. for "ST" bump mapping) to calculate an indirect
 texture coordinate over several TEV stages. This is supported by tevsl. You can
 perform indirect texture lookups without also doing a regular lookup by writing:
 
-  itexcoord = indmtx0 ** texmap1[texcoord0] * indscale0;
+    itexcoord = indmtx0 ** texmap1[texcoord0] * indscale0;
 
 and you can add to the indirect coordinate calculated by the previous stage
 (only -- i.e. no inbetween stages doing other operations are permitted) by
 writing:
 
-  itexcoord = itexcoord + indmtx0 ** texmap1[texcoord0] * indscale0;
+    itexcoord = itexcoord + indmtx0 ** texmap1[texcoord0] * indscale0;
 
 This technique can be used over multiple stages to accumulate a 2D (s,t)
 texture-coordinate result before performing a final look-up in a regular texture
@@ -438,12 +438,12 @@ you.
 If you want to use the "dynamic" S and T-type matrices, you can write that as,
 for example:
 
-stage 2:
-  itexcoord = itexcoord
-	      + (t_dynmtx (texcoord2) ** (texmap2[texcoord0]
-					  + vec3 (-128.0, -128.0, 0)))
-		* indscale0;
-  tev = tev;
+    stage 2:
+      itexcoord = itexcoord
+		  + (t_dynmtx (texcoord2) ** (texmap2[texcoord0]
+					      + vec3 (-128.0, -128.0, 0)))
+		    * indscale0;
+      tev = tev;
 
 "s_dynmtx" and "t_dynmtx" depend on the texcoord from the "regular" texture
 lookup for the stage, so are written using function-like syntax with that
@@ -478,11 +478,11 @@ indirect texture.
 To use this feature in its simplest form with tevsl, just write the same
 texcoord for direct and indirect parts:
 
-stage 0:
-  tev.rgb = texmap0[texcoord0];
+    stage 0:
+      tev.rgb = texmap0[texcoord0];
 
-stage 1:
-  cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0] * indscale0];
+    stage 1:
+      cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0] * indscale0];
 
 In this case, the scaling factor for the indirect lookup will be set to 1, so
 typically texmap0 and texmap2 will need to have the same size (the size of
@@ -491,13 +491,13 @@ by the indirect matrix).
 
 To use the scaling feature, write the indirect part like so:
 
-stage 1:
-  cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0 / 2] * indscale0];
+    stage 1:
+      cr0.rgb = texmap1[indmtx0 ** texmap2[texcoord0 / 2] * indscale0];
 
 or, for separate width/height scales, e.g:
 
-stage 1:
-  texmap1[indmtx0 ** texmap2[texcoord0 / vec2(4, 8)] * indscale0];
+    stage 1:
+      texmap1[indmtx0 ** texmap2[texcoord0 / vec2(4, 8)] * indscale0];
 
 You may use any power-of-two scale between 1 and 256.
 
@@ -510,7 +510,7 @@ Z textures
 
 You can use Z-texturing by writing an expression at the last stage, e.g.:
 
-  z = <z + >texmapM:fmt[texcoordN]< + offset>;
+    z = <z + >texmapM:fmt[texcoordN]< + offset>;
 
 (where <> indicate optional parts).
 
@@ -536,8 +536,8 @@ Alpha test
 
 Alpha test is supported using the following syntax:
 
-finally:
-  alpha_pass = tev.a > 30 && tev.a < 70;
+    finally:
+      alpha_pass = tev.a > 30 && tev.a < 70;
 
 This should be written after the last stage in your input file, since that is
 when the alpha-test logically takes place (though the placement of the "finally"
@@ -553,11 +553,11 @@ This follows the convention used by the underlying API.
 You can write any of the following for the comparison operators, which follow
 their usual meaning:
 
-  < <= == != => >
+    < <= == != => >
 
 And you can combine two comparisons using the operators:
 
-  && || ^ ==
+    && || ^ ==
 
 where "^" means exclusive-OR (first condition or second condition true, but not
 both), and "==" means equal or not-exclusive-OR (first and second condition both
@@ -566,8 +566,8 @@ logical-OR, as per usual C semantics.
 
 You may also write a single comparison, e.g.:
 
-finally:
-  alpha_pass = tev.a > 128;
+    finally:
+      alpha_pass = tev.a > 128;
 
 Then, tevsl will insert a null condition for the second comparison for you.
 
@@ -588,18 +588,18 @@ shader ".inc" file.
 
 E.g. for shader code, "texture-holes.tev":
 
-stage 0:
-  tev = texmap0[texcoord0];
+    stage 0:
+      tev = texmap0[texcoord0];
 
-finally:
-  alpha_pass = tev.a > $threshold;
+    finally:
+      alpha_pass = tev.a > $threshold;
 
 You might compile the shader and include like this:
 
-void setup_holes_shader (int threshold)
-{
-#include "texture-holes.inc"
-}
+    void setup_holes_shader (int threshold)
+    {
+    #include "texture-holes.inc"
+    }
 
 Then, you can vary the threshold by calling this function with a suitable
 argument.
